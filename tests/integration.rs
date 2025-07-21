@@ -20,11 +20,11 @@ async fn test_health_and_auth_endpoints() {
     let app = {
         use rust_jwt_backend as _; // Ensure the crate is linked
         use axum::{Router, routing::{get, post}};
-        use crate::api;
-        use crate::config;
-        use crate::core;
-        use crate::infrastructure;
-        use crate::middleware;
+        use rust_jwt_backend::api;
+        use rust_jwt_backend::config;
+        use rust_jwt_backend::core;
+        use rust_jwt_backend::infrastructure;
+        use rust_jwt_backend::middleware;
         use sqlx::PgPool;
         use tower_http::trace::TraceLayer;
 
@@ -42,8 +42,9 @@ async fn test_health_and_auth_endpoints() {
     };
 
     // Spawn the server
-    let server = axum::serve(listener, app.into_make_service());
-    tokio::spawn(server);
+    tokio::spawn(async move {
+        axum::serve(listener, app.into_make_service()).await.unwrap();
+    });
     sleep(Duration::from_millis(100)).await; // Give the server a moment to start
 
     let client = Client::new();
