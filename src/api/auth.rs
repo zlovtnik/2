@@ -62,4 +62,67 @@ pub async fn refresh() -> impl IntoResponse {
     // Use verify_jwt to avoid unused warning
     let _ = use_verify_jwt_for_warning("dummy_token");
     (axum::http::StatusCode::OK, "refresh")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{body::Body, http::{Request, StatusCode}, Json, Router, routing::post};
+    use serde_json::json;
+    use tower::ServiceExt; // for `oneshot`
+    use std::env;
+
+    fn app() -> Router {
+        Router::new()
+            .route("/register", post(register))
+            .route("/login", post(login))
+            .route("/refresh", post(refresh))
+    }
+
+    #[tokio::test]
+    async fn test_register_success() {
+        env::set_var("APP_AUTH__JWT_SECRET", "testsecretkeytestsecretkeytestsecr");
+        let payload = json!({
+            "email": "test@example.com",
+            "password": "password123",
+            "full_name": "Test User"
+        });
+        let req = Request::builder()
+            .method("POST")
+            .uri("/register")
+            .header("content-type", "application/json")
+            .body(Body::from(payload.to_string()))
+            .unwrap();
+        let res = app().oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_login_success() {
+        env::set_var("APP_AUTH__JWT_SECRET", "testsecretkeytestsecretkeytestsecr");
+        let payload = json!({
+            "email": "test@example.com",
+            "password": "password123"
+        });
+        let req = Request::builder()
+            .method("POST")
+            .uri("/login")
+            .header("content-type", "application/json")
+            .body(Body::from(payload.to_string()))
+            .unwrap();
+        let res = app().oneshot(req).await.unwrap();
+        // The stub always succeeds
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_refresh() {
+        let req = Request::builder()
+            .method("POST")
+            .uri("/refresh")
+            .body(Body::empty())
+            .unwrap();
+        let res = app().oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
 } 

@@ -67,3 +67,51 @@ pub async fn update_user(State(pool): State<PgPool>, Path(id): Path<Uuid>, Json(
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {}", e)).into_response(),
     }
 } 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{body::Body, http::{Request, StatusCode}, Json, Router, routing::post};
+    use serde_json::json;
+    use tower::ServiceExt; // for `oneshot`
+    use sqlx::PgPool;
+    use std::sync::Arc;
+    use std::env;
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    // Dummy pool for demonstration (not a real DB connection)
+    fn dummy_pool() -> PgPool {
+        // This will panic if actually used, but allows us to test endpoint wiring
+        PgPool::connect_lazy("postgres://user:pass@localhost/db").unwrap()
+    }
+
+    fn app() -> Router {
+        Router::new()
+            .route("/users", post(create_user))
+            // Add more routes as needed
+            .with_state(dummy_pool())
+    }
+
+    #[tokio::test]
+    async fn test_create_user_returns_500_on_db_error() {
+        let user = json!({
+            "id": Uuid::new_v4(),
+            "email": "test@example.com",
+            "password_hash": "hash",
+            "full_name": "Test User",
+            "preferences": null,
+            "created_at": Utc::now(),
+            "updated_at": Utc::now()
+        });
+        let req = Request::builder()
+            .method("POST")
+            .uri("/users")
+            .header("content-type", "application/json")
+            .body(Body::from(user.to_string()))
+            .unwrap();
+        let res = app().oneshot(req).await.unwrap();
+        // Since the dummy pool is not connected, this should return 500
+        assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+} 

@@ -66,3 +66,44 @@ pub async fn update_refresh_token(State(pool): State<PgPool>, Path(id): Path<Uui
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {}", e)).into_response(),
     }
 } 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{body::Body, http::{Request, StatusCode}, Json, Router, routing::post};
+    use serde_json::json;
+    use tower::ServiceExt; // for `oneshot`
+    use sqlx::PgPool;
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    fn dummy_pool() -> PgPool {
+        PgPool::connect_lazy("postgres://user:pass@localhost/db").unwrap()
+    }
+
+    fn app() -> Router {
+        Router::new()
+            .route("/refresh_tokens", post(create_refresh_token))
+            .with_state(dummy_pool())
+    }
+
+    #[tokio::test]
+    async fn test_create_refresh_token_returns_500_on_db_error() {
+        let token = json!({
+            "id": Uuid::new_v4(),
+            "user_id": Uuid::new_v4(),
+            "token": "sometokenstring",
+            "expires_at": Utc::now(),
+            "created_at": Utc::now()
+        });
+        let req = Request::builder()
+            .method("POST")
+            .uri("/refresh_tokens")
+            .header("content-type", "application/json")
+            .body(Body::from(token.to_string()))
+            .unwrap();
+        let res = app().oneshot(req).await.unwrap();
+        // Since the dummy pool is not connected, this should return 500
+        assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+} 
