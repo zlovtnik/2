@@ -8,6 +8,35 @@ use sqlx::PgPool;
 use axum::extract::State;
 use chrono::Utc;
 use utoipa::ToSchema;
+use serde::Serialize;
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ErrorResponse {
+    error: String,
+    details: Option<String>,
+}
+
+impl ErrorResponse {
+    fn new(error: impl Into<String>, details: Option<String>) -> Self {
+        Self {
+            error: error.into(),
+            details,
+        }
+    }
+}
+
+// Convert our error responses into proper HTTP responses
+impl IntoResponse for ErrorResponse {
+    fn into_response(self) -> axum::response::Response {
+        let status = match self.error.as_str() {
+            "Registration failed" => axum::http::StatusCode::BAD_REQUEST,
+            "Invalid credentials" => axum::http::StatusCode::UNAUTHORIZED,
+            _ => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        
+        (status, Json(self)).into_response()
+    }
+}
 
 #[derive(serde::Serialize, ToSchema)]
 pub struct TokenResponse {
@@ -23,16 +52,13 @@ pub struct TokenResponse {
         (status = 500, description = "Registration failed")
     )
 )]
-pub async fn register(State(pool): State<PgPool>, Json(payload): Json<RegisterRequest>) -> Result<Json<TokenResponse>, (axum::http::StatusCode, &'static str)> {
+pub async fn register(State(pool): State<PgPool>, Json(payload): Json<RegisterRequest>) -> Result<Json<TokenResponse>, ErrorResponse> {
     info!(email = %payload.email, "Registration attempt");
     // Hash password
-    let password_hash = match hash_password(&payload.password) {
-        Ok(hash) => hash,
-        Err(e) => {
-            warn!(error = %e, "Password hashing failed");
-            return Err((axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Registration failed"));
-        }
-    };
+    let password_hash = hash_password(&payload.password).map_err(|e| {
+        warn!(error = %e, "Password hashing failed");
+        ErrorResponse::new("Registration failed", Some(format!("Failed to hash password: {}", e)))
+    })?;
     let user = User {
         id: Uuid::new_v4(),
         email: payload.email.clone(),
@@ -43,7 +69,7 @@ pub async fn register(State(pool): State<PgPool>, Json(payload): Json<RegisterRe
         updated_at: Utc::now(),
     };
     let query = "INSERT INTO users (id, email, password_hash, full_name, preferences, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *";
-    let inserted = match sqlx::query_as::<_, User>(query)
+    let inserted = sqlx::query_as::<_, User>(query)
         .bind(user.id)
         .bind(&user.email)
         .bind(&user.password_hash)
@@ -52,21 +78,21 @@ pub async fn register(State(pool): State<PgPool>, Json(payload): Json<RegisterRe
         .bind(user.created_at)
         .bind(user.updated_at)
         .fetch_one(&pool)
-        .await {
-        Ok(u) => u,
-        Err(e) => {
+        .await
+        .map_err(|e| {
             warn!(error = %e, "User insert failed");
-            return Err((axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Registration failed"));
-        }
-    };
+            let error_msg = if e.to_string().contains("duplicate key") {
+                "Email already exists"
+            } else {
+                "Failed to create user"
+            };
+            ErrorResponse::new("Registration failed", Some(error_msg.to_string()))
+        })?;
     // Create JWT
-    let token = match create_jwt(inserted.id) {
-        Ok(token) => token,
-        Err(e) => {
-            warn!(error = %e, "JWT creation failed");
-            return Err((axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Registration failed"));
-        }
-    };
+    let token = create_jwt(inserted.id).map_err(|e| {
+        warn!(error = %e, "JWT creation failed");
+        ErrorResponse::new("Registration failed", Some("Failed to generate authentication token".to_string()))
+    })?;
     info!(user_id = %inserted.id, "User registered successfully");
     Ok(Json(TokenResponse { token }))
 }
@@ -80,26 +106,35 @@ pub async fn register(State(pool): State<PgPool>, Json(payload): Json<RegisterRe
         (status = 401, description = "Invalid credentials")
     )
 )]
-pub async fn login(Json(payload): Json<LoginRequest>) -> Result<Json<TokenResponse>, (axum::http::StatusCode, &'static str)> {
+pub async fn login(State(pool): State<PgPool>, Json(payload): Json<LoginRequest>) -> Result<Json<TokenResponse>, ErrorResponse> {
     info!(email = %payload.email, "Login attempt");
-    // Stub: pretend to fetch user and password hash
-    let stored_hash = match hash_password(&payload.password) { Ok(h) => h, Err(_) => "".to_string() };
+    
+    // Fetch user from database
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
+        .bind(&payload.email)
+        .fetch_optional(&pool)
+        .await
+        .map_err(|e| {
+            warn!(error = %e, "Database error during login");
+            ErrorResponse::new("Login failed", Some("An error occurred while processing your request".to_string()))
+        })?
+        .ok_or_else(|| {
+            warn!(email = %payload.email, "User not found");
+            ErrorResponse::new("Invalid credentials", Some("Invalid email or password".to_string()))
+        })?;
+
     // Verify password
-    if !verify_password(&payload.password, &stored_hash) {
+    if !verify_password(&payload.password, &user.password_hash) {
         warn!(email = %payload.email, "Invalid password");
-        return Err((axum::http::StatusCode::UNAUTHORIZED, "Invalid credentials"));
+        return Err(ErrorResponse::new("Invalid credentials", Some("Invalid email or password".to_string())));
     }
-    // Stub: pretend to get user_id
-    let user_id = Uuid::new_v4();
+
     // Create JWT
-    let token = match create_jwt(user_id) {
-        Ok(token) => token,
-        Err(e) => {
-            warn!(error = %e, "JWT creation failed");
-            return Err((axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Login failed"));
-        }
-    };
-    info!(user_id = %user_id, "User logged in successfully");
+    let token = create_jwt(user.id).map_err(|e| {
+        warn!(error = %e, "JWT creation failed");
+        ErrorResponse::new("Login failed", Some("Failed to generate authentication token".to_string()))
+    })?;
+    info!(user_id = %user.id, "User logged in successfully");
     Ok(Json(TokenResponse { token }))
 }
 
