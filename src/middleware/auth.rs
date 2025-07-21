@@ -1,0 +1,27 @@
+use axum::extract::FromRequestParts;
+use axum::http::{request::Parts, StatusCode};
+use crate::core::auth::verify_jwt;
+use uuid::Uuid;
+
+pub struct AuthenticatedUser(pub Uuid);
+
+impl<S> FromRequestParts<S> for AuthenticatedUser
+where
+    S: Send + Sync,
+{
+    type Rejection = (StatusCode, &'static str);
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let auth_header = parts.headers.get(axum::http::header::AUTHORIZATION)
+            .and_then(|h| h.to_str().ok())
+            .and_then(|h| h.strip_prefix("Bearer "));
+        if let Some(token) = auth_header {
+            match verify_jwt(token) {
+                Ok(user_id) => Ok(AuthenticatedUser(user_id)),
+                Err(_) => Err((StatusCode::UNAUTHORIZED, "Invalid or expired token")),
+            }
+        } else {
+            Err((StatusCode::UNAUTHORIZED, "Missing Authorization header"))
+        }
+    }
+} 

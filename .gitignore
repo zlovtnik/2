@@ -1,0 +1,47 @@
+# Rust build
+/target/
+**/*.rs.bk
+
+# SQLx offline data
+/.sqlx/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# IDE/editor
+/.vscode/
+/.idea/
+*.swp
+*.swo
+*.swn
+*.bak
+*.tmp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Coverage
+/coverage/
+
+# Docker
+/docker-data/
+
+# Misc
+*.old
+*.orig
+*.rej
+
+# Node/npm (if any frontend)
+/node_modules/
+
+# CI/CD
+/ci-artifacts/
+
+# Ignore local test output
+/tests/output/ 
