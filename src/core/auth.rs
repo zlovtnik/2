@@ -83,4 +83,37 @@ pub fn verify_jwt(token: &str) -> anyhow::Result<uuid::Uuid> {
 
 pub fn use_verify_jwt_for_warning(token: &str) -> bool {
     verify_jwt(token).is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use uuid::Uuid;
+
+    #[test]
+    fn test_hash_and_verify_password() {
+        let password = "test_password";
+        let hash = hash_password(password).expect("Hashing should succeed");
+        assert!(verify_password(password, &hash));
+        assert!(!verify_password("wrong_password", &hash));
+    }
+
+    #[test]
+    fn test_create_and_verify_jwt() {
+        // Set a fixed secret for deterministic tests
+        env::set_var("APP_AUTH__JWT_SECRET", "testsecretkeytestsecretkeytestsecr");
+        let user_id = Uuid::new_v4();
+        let token = create_jwt(user_id).expect("JWT creation should succeed");
+        let parsed_id = verify_jwt(&token).expect("JWT verification should succeed");
+        assert_eq!(user_id, parsed_id);
+    }
+
+    #[test]
+    fn test_verify_jwt_invalid_token() {
+        env::set_var("APP_AUTH__JWT_SECRET", "testsecretkeytestsecretkeytestsecr");
+        let invalid_token = "invalid.token.value";
+        let result = verify_jwt(invalid_token);
+        assert!(result.is_err());
+    }
 } 
