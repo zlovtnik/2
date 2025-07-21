@@ -4,21 +4,22 @@ use argon2::password_hash::{SaltString, PasswordHasher, PasswordHash, PasswordVe
 use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey, Algorithm, TokenData};
 use std::env;
 use rand_core::OsRng;
+use utoipa::ToSchema;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct RegisterRequest {
     pub email: String,
     pub password: String,
     pub full_name: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct LoginRequest {
     pub email: String,
     pub password: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct UserProfile {
     pub id: uuid::Uuid,
     pub email: String,
@@ -26,7 +27,7 @@ pub struct UserProfile {
     pub preferences: Option<UserPreferences>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct UserPreferences {
     pub theme: Option<String>,
     pub notifications: Option<bool>,

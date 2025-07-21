@@ -2,16 +2,21 @@ use axum::extract::FromRequestParts;
 use axum::http::{request::Parts, StatusCode};
 use crate::core::auth::verify_jwt;
 use uuid::Uuid;
+use async_trait::async_trait;
 
 pub struct AuthenticatedUser(pub Uuid);
 
+#[async_trait]
 impl<S> FromRequestParts<S> for AuthenticatedUser
 where
     S: Send + Sync,
 {
     type Rejection = (StatusCode, &'static str);
 
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(
+        parts: &mut Parts,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
         let auth_header = parts.headers.get(axum::http::header::AUTHORIZATION)
             .and_then(|h| h.to_str().ok())
             .and_then(|h| h.strip_prefix("Bearer "));

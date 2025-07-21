@@ -11,7 +11,7 @@ fn user_crud_box(pool: PgPool) -> Box<dyn Crud<User, Uuid> + Send + Sync> {
 }
 
 pub async fn create_user(State(pool): State<PgPool>, Json(user): Json<User>) -> impl IntoResponse {
-    // Direct SQLx for insert (trait object not needed for this demo)
+    // Direct SQLx for insert (as before)
     let query = "INSERT INTO users (id, email, password_hash, full_name, preferences, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *";
     match sqlx::query_as::<_, User>(query)
         .bind(user.id)
@@ -49,6 +49,15 @@ pub async fn delete_user(State(pool): State<PgPool>, Path(id): Path<Uuid>) -> im
 }
 
 // For demonstration, a simple update handler that updates the full_name
+pub async fn get_current_user(AuthenticatedUser(user_id): AuthenticatedUser, State(pool): State<PgPool>) -> impl IntoResponse {
+    let crud = user_crud_box(pool);
+    match crud.read(user_id).await {
+        Ok(Some(user)) => (StatusCode::OK, Json(user)).into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "User not found").into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {}", e)).into_response(),
+    }
+}
+
 pub async fn update_user(State(pool): State<PgPool>, Path(id): Path<Uuid>, Json(new_name): Json<String>) -> impl IntoResponse {
     let crud = PgCrud::new(pool, "users");
     match crud.read(id).await {

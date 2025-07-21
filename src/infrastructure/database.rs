@@ -34,6 +34,13 @@ impl<T> PgCrud<T> {
     }
 }
 
+impl<T> PgCrud<T>
+where
+    T: Send + Sync + Unpin + for<'r> FromRow<'r, sqlx::postgres::PgRow> + 'static,
+{
+    // Remove the create_with helper. No generic insert helper is provided.
+}
+
 #[async_trait]
 impl<T, Id> Crud<T, Id> for PgCrud<T>
 where

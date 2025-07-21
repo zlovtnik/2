@@ -45,7 +45,7 @@ setup: install ## Setup development environment
 
 dev: ## Start development server with hot reload
 	@echo "$(GREEN)Starting development server...$(NC)"
-	cargo watch -x 'run --bin server'
+	cargo watch -x 'run --bin rust-jwt-backend'
 
 ## Building
 
