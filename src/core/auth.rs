@@ -5,6 +5,7 @@ use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey,
 use std::env;
 use rand_core::OsRng;
 use utoipa::ToSchema;
+use tracing::{info, warn, error, debug};
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct RegisterRequest {
@@ -40,45 +41,97 @@ struct Claims {
 }
 
 pub fn hash_password(password: &str) -> anyhow::Result<String> {
+    debug!("Starting password hashing operation");
     let salt = SaltString::generate(&mut OsRng);
+    debug!("Generated salt for password hashing");
+    
     let argon2 = Argon2::default();
     let hash = argon2.hash_password(password.as_bytes(), &salt)
-        .map_err(|e| anyhow::anyhow!(e))?
+        .map_err(|e| {
+            error!(error = %e, "Password hashing failed");
+            anyhow::anyhow!(e)
+        })?
         .to_string();
+    
+    debug!("Password hashed successfully");
     Ok(hash)
 }
 
 pub fn verify_password(password: &str, hash: &str) -> bool {
+    debug!("Starting password verification");
     let parsed_hash = PasswordHash::new(hash);
     if let Ok(parsed_hash) = parsed_hash {
-        Argon2::default().verify_password(password.as_bytes(), &parsed_hash).is_ok()
+        let verification_result = Argon2::default().verify_password(password.as_bytes(), &parsed_hash).is_ok();
+        if verification_result {
+            debug!("Password verification successful");
+        } else {
+            warn!("Password verification failed - invalid password");
+        }
+        verification_result
     } else {
+        error!("Failed to parse password hash");
         false
     }
 }
 
 pub fn create_jwt(user_id: uuid::Uuid) -> anyhow::Result<String> {
-    let secret = env::var("APP_AUTH__JWT_SECRET").unwrap_or_else(|_| "mysecretkeymysecretkeymysecretkey12".to_string());
+    info!(user_id = %user_id, "Creating JWT token");
+    debug!("Loading JWT secret from environment");
+    
+    let secret = env::var("APP_AUTH__JWT_SECRET").unwrap_or_else(|_| {
+        warn!("JWT secret not found in environment, using default");
+        "mysecretkeymysecretkeymysecretkey12".to_string()
+    });
+    
     let expiration = chrono::Utc::now()
         .checked_add_signed(chrono::Duration::hours(24))
         .expect("valid timestamp")
         .timestamp() as usize;
+    
+    debug!(user_id = %user_id, expiration = expiration, "Creating JWT claims");
     let claims = Claims {
         sub: user_id.to_string(),
         exp: expiration,
     };
-    let token = encode(&Header::new(Algorithm::HS256), &claims, &EncodingKey::from_secret(secret.as_bytes()))?;
+    
+    debug!("Encoding JWT token");
+    let token = encode(&Header::new(Algorithm::HS256), &claims, &EncodingKey::from_secret(secret.as_bytes()))
+        .map_err(|e| {
+            error!(user_id = %user_id, error = %e, "Failed to encode JWT token");
+            anyhow::anyhow!(e)
+        })?;
+    
+    info!(user_id = %user_id, "JWT token created successfully");
     Ok(token)
 }
 
 pub fn verify_jwt(token: &str) -> anyhow::Result<uuid::Uuid> {
-    let secret = env::var("APP_AUTH__JWT_SECRET").unwrap_or_else(|_| "mysecretkeymysecretkeymysecretkey12".to_string());
+    debug!("Starting JWT token verification");
+    debug!("Loading JWT secret from environment");
+    
+    let secret = env::var("APP_AUTH__JWT_SECRET").unwrap_or_else(|_| {
+        warn!("JWT secret not found in environment, using default");
+        "mysecretkeymysecretkeymysecretkey12".to_string()
+    });
+    
+    debug!("Decoding JWT token");
     let token_data: TokenData<Claims> = decode::<Claims>(
         token,
         &DecodingKey::from_secret(secret.as_bytes()),
         &Validation::new(Algorithm::HS256),
-    )?;
-    let user_id = uuid::Uuid::parse_str(&token_data.claims.sub)?;
+    ).map_err(|e| {
+        warn!(error = %e, "JWT token verification failed");
+        anyhow::anyhow!(e)
+    })?;
+    
+    debug!("Parsing user ID from JWT claims");
+    let user_id = uuid::Uuid::parse_str(&token_data.claims.sub)
+        .map_err(|e| {
+            error!(error = %e, "Failed to parse user ID from JWT claims");
+            anyhow::anyhow!(e)
+        })?;
+    
+    info!(user_id = %user_id, "JWT token verified successfully");
     Ok(user_id)
 }
 
