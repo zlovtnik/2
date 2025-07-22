@@ -4,14 +4,20 @@ use crate::core::refresh_token::RefreshToken;
 use crate::infrastructure::database::{Crud, PgCrud, UpdatableCrud};
 use sqlx::PgPool;
 use axum::http::StatusCode;
+use tracing::{info, warn, error, debug};
 
 fn refresh_token_crud_box(pool: PgPool) -> Box<dyn Crud<RefreshToken, Uuid> + Send + Sync> {
     Box::new(PgCrud::new(pool, "refresh_tokens"))
 }
 
 pub async fn create_refresh_token(State(pool): State<PgPool>, Json(token): Json<RefreshToken>) -> impl IntoResponse {
+    info!(token_id = %token.id, user_id = %token.user_id, "Creating new refresh token");
+    debug!(token_id = %token.id, expires_at = %token.expires_at, "Refresh token creation details");
+    
     // Direct SQLx for insert (trait object not needed for this demo)
     let query = "INSERT INTO refresh_tokens (id, user_id, token, expires_at, created_at) VALUES ($1, $2, $3, $4, $5) RETURNING *";
+    debug!("Executing refresh token insert query");
+    
     match sqlx::query_as::<_, RefreshToken>(query)
         .bind(token.id)
         .bind(token.user_id)
@@ -21,51 +27,113 @@ pub async fn create_refresh_token(State(pool): State<PgPool>, Json(token): Json<
         .fetch_one(&pool)
         .await
     {
-        Ok(inserted) => (StatusCode::CREATED, Json(inserted)).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {}", e)).into_response(),
+        Ok(inserted) => {
+            info!(token_id = %inserted.id, user_id = %inserted.user_id, "Refresh token created successfully");
+            (StatusCode::CREATED, Json(inserted)).into_response()
+        },
+        Err(e) => {
+            error!(token_id = %token.id, user_id = %token.user_id, error = %e, "Failed to create refresh token");
+            if e.to_string().contains("duplicate key") {
+                warn!(token_id = %token.id, "Attempted to create refresh token with duplicate ID");
+                (StatusCode::CONFLICT, "Refresh token with this ID already exists".to_string()).into_response()
+            } else {
+                (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {}", e)).into_response()
+            }
+        },
     }
 }
 
 pub async fn get_refresh_token(State(pool): State<PgPool>, Path(id): Path<Uuid>) -> impl IntoResponse {
+    info!(token_id = %id, "Getting refresh token");
+    debug!("Creating refresh token CRUD instance");
+    
     let crud = refresh_token_crud_box(pool);
+    debug!(token_id = %id, "Executing refresh token read query");
+    
     match crud.read(id).await {
-        Ok(Some(token)) => (StatusCode::OK, Json(token)).into_response(),
-        Ok(None) => (StatusCode::NOT_FOUND, "Not found").into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {}", e)).into_response(),
+        Ok(Some(token)) => {
+            info!(token_id = %id, user_id = %token.user_id, "Refresh token retrieved successfully");
+            debug!(token_id = %id, expires_at = %token.expires_at, "Refresh token details retrieved");
+            (StatusCode::OK, Json(token)).into_response()
+        },
+        Ok(None) => {
+            warn!(token_id = %id, "Refresh token not found");
+            (StatusCode::NOT_FOUND, "Not found").into_response()
+        },
+        Err(e) => {
+            error!(token_id = %id, error = %e, "Failed to retrieve refresh token");
+            (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {}", e)).into_response()
+        },
     }
 }
 
 pub async fn delete_refresh_token(State(pool): State<PgPool>, Path(id): Path<Uuid>) -> impl IntoResponse {
+    info!(token_id = %id, "Deleting refresh token");
+    debug!("Creating refresh token CRUD instance for deletion");
+    
     let crud = refresh_token_crud_box(pool);
+    debug!(token_id = %id, "Executing refresh token delete query");
+    
     match crud.delete(id).await {
-        Ok(affected) if affected > 0 => (StatusCode::NO_CONTENT, "").into_response(),
-        Ok(_) => (StatusCode::NOT_FOUND, "Not found").into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {}", e)).into_response(),
+        Ok(affected) if affected > 0 => {
+            info!(token_id = %id, affected_rows = affected, "Refresh token deleted successfully");
+            (StatusCode::NO_CONTENT, "").into_response()
+        },
+        Ok(affected) => {
+            warn!(token_id = %id, affected_rows = affected, "Refresh token not found for deletion");
+            (StatusCode::NOT_FOUND, "Not found").into_response()
+        },
+        Err(e) => {
+            error!(token_id = %id, error = %e, "Failed to delete refresh token");
+            (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {}", e)).into_response()
+        },
     }
 }
 
 // For demonstration, a simple update handler that updates the token string
 pub async fn update_refresh_token(State(pool): State<PgPool>, Path(id): Path<Uuid>, Json(new_token): Json<String>) -> impl IntoResponse {
-    let crud = PgCrud::new(pool, "refresh_tokens");
+    info!(token_id = %id, "Updating refresh token");
+    debug!("Creating refresh token CRUD instance for update");
+    
+    let crud: PgCrud<RefreshToken> = PgCrud::new(pool, "refresh_tokens");
+    debug!(token_id = %id, "Checking if refresh token exists before update");
+    
     // For demonstration, fetch, update, and save using the UpdatableCrud trait
     // In a real implementation, you'd want to update only the necessary fields
     match crud.read(id).await {
-        Ok(Some(_existing)) => {
+        Ok(Some(existing)) => {
+            info!(token_id = %id, user_id = %existing.user_id, "Refresh token found, proceeding with update");
             let update_fn = |mut t: RefreshToken| {
                 t.token = new_token.clone();
                 t
             };
+            debug!(token_id = %id, "Executing refresh token update");
             // Call update via the trait (note: this is a stub, real SQL needed)
             match UpdatableCrud::update(&crud, id, update_fn).await {
-                Ok(Some(updated)) => (StatusCode::OK, Json(updated)).into_response(),
-                Ok(None) => (StatusCode::NOT_FOUND, "Not found").into_response(),
-                Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {}", e)).into_response(),
+                Ok(Some(updated)) => {
+                    info!(token_id = %id, user_id = %updated.user_id, "Refresh token updated successfully");
+                    (StatusCode::OK, Json(updated)).into_response()
+                },
+                Ok(None) => {
+                    warn!(token_id = %id, "Refresh token not found during update operation");
+                    (StatusCode::NOT_FOUND, "Not found").into_response()
+                },
+                Err(e) => {
+                    error!(token_id = %id, error = %e, "Failed to update refresh token");
+                    (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {}", e)).into_response()
+                },
             }
         }
-        Ok(None) => (StatusCode::NOT_FOUND, "Not found").into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {}", e)).into_response(),
+        Ok(None) => {
+            warn!(token_id = %id, "Refresh token not found for update");
+            (StatusCode::NOT_FOUND, "Not found").into_response()
+        },
+        Err(e) => {
+            error!(token_id = %id, error = %e, "Failed to check refresh token existence before update");
+            (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {}", e)).into_response()
+        },
     }
-} 
+}
 
 #[cfg(test)]
 mod tests {
