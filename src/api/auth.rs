@@ -3,7 +3,6 @@ use crate::core::auth::{RegisterRequest, LoginRequest, hash_password, verify_pas
 use tracing::{info, warn};
 use uuid::Uuid;
 use crate::core::user::User;
-use crate::infrastructure::database::PgCrud;
 use sqlx::PgPool;
 use axum::extract::State;
 use chrono::Utc;
@@ -155,7 +154,7 @@ pub async fn refresh() -> impl IntoResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{body::Body, http::{Request, StatusCode}, Json, Router, routing::post};
+    use axum::{body::Body, http::{Request, StatusCode}, Router, routing::post};
     use serde_json::json;                   
     use tower::ServiceExt; // for `oneshot`
     use std::env;
@@ -164,8 +163,8 @@ mod tests {
 
     // Create a test database connection pool
     async fn dummy_pool() -> PgPool {
-        let database_url = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/test_db".to_string());
+        let database_url = std::env::var("APP_DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/postgres".to_string());
             
         PgPoolOptions::new()
             .max_connections(5)
@@ -175,22 +174,25 @@ mod tests {
             .expect("Failed to create test database pool")
     }
 
-    async fn app() -> Router<PgPool> {
+    async fn app() -> Router {
         let pool = dummy_pool().await;
-        Router::new()
+        let stateful_app = Router::new()
             .route("/register", post(register))
             .route("/login", post(login))
             .route("/refresh", post(refresh))
-            .with_state(pool)
+            .with_state(pool);
+        
+        // Create a stateless router by merging the stateful one
+        Router::new().merge(stateful_app)
     }
 
     #[tokio::test]
     async fn test_login_success() {
-        env::set_var("APP_AUTH__JWT_SECRET", "testsecretkeytestsecretkeytestsecr");
-        let app = app().await.into_make_service();
+        env::set_var("JWT_SECRET", "your-super-secret-jwt-key-here");
+        let app = app().await.into_service();
         let payload = json!({
-            "email": "test@example.com",
-            "password": "password123"
+            "email": "test@test.com",
+            "password": "test123"
         });
         let req = Request::builder()
             .method("POST")
@@ -213,7 +215,7 @@ mod tests {
             .uri("/refresh")
             .body(Body::empty())
             .unwrap();
-        let app = app().await.into_make_service();
+        let app = app().await.into_service();
         let res = app.oneshot(req).await.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
     }

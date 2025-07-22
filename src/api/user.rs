@@ -61,7 +61,7 @@ pub async fn get_current_user(AuthenticatedUser(user_id): AuthenticatedUser, Sta
 pub async fn update_user(State(pool): State<PgPool>, Path(id): Path<Uuid>, Json(new_name): Json<String>) -> impl IntoResponse {
     let crud = PgCrud::new(pool, "users");
     match crud.read(id).await {
-        Ok(Some(existing)) => {
+        Ok(Some(_existing)) => {
             let update_fn = |mut u: User| {
                 u.full_name = new_name.clone();
                 u
@@ -80,12 +80,12 @@ pub async fn update_user(State(pool): State<PgPool>, Path(id): Path<Uuid>, Json(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{body::Body, http::{Request, StatusCode}, Json, Router, routing::post};
+    use axum::{body::Body, http::{Request, StatusCode}, Router, routing::post};
     use serde_json::json;
     use tower::ServiceExt; // for `oneshot`
     use sqlx::PgPool;
-    use std::sync::Arc;
-    use std::env;
+    
+    
     use chrono::Utc;
     use uuid::Uuid;
 

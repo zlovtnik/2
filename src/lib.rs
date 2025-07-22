@@ -1,9 +1,8 @@
-use axum::{Router, routing::{get, post, put, delete}, http::Method, Extension};
+use axum::{Router, routing::{get, post, put, delete}, http::Method};
 use sqlx::PgPool;
 use tower_http::{trace::TraceLayer, cors::{CorsLayer, Any}};
 use utoipa_swagger_ui::SwaggerUi;
 use utoipa::OpenApi;
-use std::sync::Arc;
 mod docs;
 
 pub mod config;
@@ -50,7 +49,7 @@ pub fn app(pool: PgPool) -> Router {
         .allow_headers(Any);
 
     // Create the final router with middleware and Swagger UI
-    let swagger_ui = SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", openapi);
+    let _swagger_ui = SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", openapi);
     
     let app = Router::new()
         .merge(app)

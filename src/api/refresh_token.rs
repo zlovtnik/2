@@ -50,7 +50,7 @@ pub async fn update_refresh_token(State(pool): State<PgPool>, Path(id): Path<Uui
     // For demonstration, fetch, update, and save using the UpdatableCrud trait
     // In a real implementation, you'd want to update only the necessary fields
     match crud.read(id).await {
-        Ok(Some(existing)) => {
+        Ok(Some(_existing)) => {
             let update_fn = |mut t: RefreshToken| {
                 t.token = new_token.clone();
                 t
@@ -70,7 +70,7 @@ pub async fn update_refresh_token(State(pool): State<PgPool>, Path(id): Path<Uui
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{body::Body, http::{Request, StatusCode}, Json, Router, routing::post};
+    use axum::{body::Body, http::{Request, StatusCode}, Router, routing::post};
     use serde_json::json;
     use tower::ServiceExt; // for `oneshot`
     use sqlx::PgPool;

@@ -1,5 +1,4 @@
 use utoipa::OpenApi;
-use utoipa::ToSchema;
 
 /// Main API documentation
 /// 
