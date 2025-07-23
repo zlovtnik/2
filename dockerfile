@@ -12,7 +12,9 @@ RUN apk add --no-cache \
     pkgconfig \
     openssl-dev \
     openssl-libs-static \
-    ca-certificates
+    ca-certificates \
+    protobuf-dev \
+    protoc
 
 # Create app user for security
 RUN addgroup -g 1000 appgroup && \
@@ -34,6 +36,8 @@ RUN mkdir src && \
 # Copy source code
 COPY src/ ./src/
 COPY migrations/ ./migrations/
+COPY proto/ ./proto/
+COPY build.rs ./
 
 # Build the actual application
 # Use SQLX_OFFLINE=true to avoid database requirement during build
