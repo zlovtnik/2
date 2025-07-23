@@ -1,9 +1,15 @@
 #!/bin/bash
 set -e
 
-# Install protoc if not already installed
-if ! command -v protoc &> /dev/null; then
-    echo "Installing protoc..."
+# Check if protoc is already installed and working
+if command -v protoc &> /dev/null && protoc --version &> /dev/null; then
+    echo "protoc is already installed and working: $(protoc --version)"
+    echo "protoc location: $(which protoc)"
+    exit 0
+fi
+
+# Install protoc if not already installed or not working
+echo "protoc not found or not working, installing..."
     PROTOC_VERSION=25.1
     PROTOC_ARCH=linux-x86_64
     PROTOC_ZIP=protoc-${PROTOC_VERSION}-${PROTOC_ARCH}.zip
