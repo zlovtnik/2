@@ -91,4 +91,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD ["/usr/local/bin/rust-jwt-backend", "--health-check"] || exit 1
 
 # Run the application
-ENTRYPOINT ["/usr/local/
+ENTRYPOINT ["/usr/local/bin/rust-jwt-backend"]
