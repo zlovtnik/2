@@ -1,0 +1,30 @@
+build:
+  buildCommand: |
+    # Install protoc
+    apt-get update && apt-get install -y protobuf-compiler
+    # Build the project
+    cargo build --release
+  runtime: rust
+
+services:
+  - type: web
+    name: server
+    env: rust
+    buildCommand: |
+      # Install protoc
+      apt-get update && apt-get install -y protobuf-compiler
+      # Build the project
+      cargo build --release
+    startCommand: ./target/release/server
+    envVars:
+      - key: PROTOC
+        value: /usr/bin/protoc
+      - key: PROTOC_INCLUDE
+        value: "/usr/include:/usr/local/include"
+    build:
+      buildCommand: |
+        # Install protoc
+        apt-get update && apt-get install -y protobuf-compiler
+        # Build the project
+        cargo build --release
+    env: rust
