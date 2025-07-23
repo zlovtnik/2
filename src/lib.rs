@@ -3,6 +3,8 @@ use sqlx::PgPool;
 use tower_http::{trace::TraceLayer, cors::{CorsLayer, Any}};
 use utoipa_swagger_ui::SwaggerUi;
 use utoipa::OpenApi;
+use tonic::transport::Server;
+use std::net::SocketAddr;
 mod docs;
 
 pub mod config;
@@ -10,6 +12,7 @@ pub mod api;
 pub mod core;
 pub mod infrastructure;
 pub mod middleware;
+pub mod grpc;
 
 pub fn app(pool: PgPool) -> Router {
     // Create OpenAPI documentation
@@ -29,6 +32,7 @@ pub fn app(pool: PgPool) -> Router {
         // User endpoints
         .route("/api/v1/users", post(api::user::create_user))
         .route("/api/v1/users/me", get(api::user::get_current_user))
+        .route("/api/v1/users/me/stats", get(api::user::get_current_user_stats))
         .route("/api/v1/users/:id", get(api::user::get_user))
         .route("/api/v1/users/:id", put(api::user::update_user))
         .route("/api/v1/users/:id", delete(api::user::delete_user))
@@ -56,4 +60,25 @@ pub fn app(pool: PgPool) -> Router {
         .layer(TraceLayer::new_for_http())
         .layer(cors);
     app
-} 
+}
+
+pub async fn grpc_server(pool: PgPool, addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
+    use grpc::user_stats::{user_stats::user_stats_service_server::UserStatsServiceServer, UserStatsServiceImpl};
+    use tonic_reflection::server::Builder as ReflectionBuilder;
+
+    let user_stats_service = UserStatsServiceImpl::new(pool);
+
+    let reflection_service = ReflectionBuilder::configure()
+        .register_encoded_file_descriptor_set(include_bytes!(concat!(env!("OUT_DIR"), "/user_stats.bin")))
+        .build()?;
+
+    tracing::info!("Starting gRPC server on {}", addr);
+
+    Server::builder()
+        .add_service(UserStatsServiceServer::new(user_stats_service))
+        .add_service(reflection_service)
+        .serve(addr)
+        .await?;
+
+    Ok(())
+}
