@@ -6,10 +6,10 @@ use std::net::SocketAddr;
 use std::env;
 
 async fn app() -> axum::Router {
-    use rust_jwt_backend as _; // Ensure the crate is linked
+    use server as _; // Ensure the crate is linked
     use axum::{Router, routing::{get, post}};
-    use rust_jwt_backend::api;
-    use rust_jwt_backend::config;
+    use server::api;
+    use server::config;
     use sqlx::PgPool;
     use tower_http::trace::TraceLayer;
 

@@ -5,7 +5,7 @@ use tokio::net::TcpListener;
 use tokio::signal;
 use tracing_subscriber;
 
-use rust_jwt_backend::{app, grpc_server};
+use server::{app, grpc_server};
 
 #[tokio::main]
 async fn main() {
@@ -14,7 +14,7 @@ async fn main() {
         .init();
 
     dotenvy::dotenv().ok();
-    let config = rust_jwt_backend::config::load();
+    let config = server::config::load();
     let db_url = std::env::var("APP_DATABASE_URL").expect("APP_DATABASE_URL must be set in .env or environment");
     let pool = PgPool::connect_lazy(&db_url).unwrap();
     
