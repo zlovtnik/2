@@ -9,7 +9,7 @@ CARGO := cargo
 DOCKER := docker
 KUBECTL := kubectl
 HELM := helm
-PROJECT_NAME := rust-jwt-backend
+PROJECT_NAME := server
 VERSION := $(shell git describe --tags --always --dirty)
 REGISTRY := your-registry.com
 IMAGE := $(REGISTRY)/$(PROJECT_NAME):$(VERSION)
@@ -45,7 +45,7 @@ setup: install ## Setup development environment
 
 dev: ## Start development server with hot reload
 	@echo "$(GREEN)Starting development server...$(NC)"
-	cargo watch -x 'run --bin rust-jwt-backend'
+	cargo watch -x 'run --bin server'
 
 ## Building
 
@@ -300,7 +300,7 @@ benchmark: ## Run performance benchmarks
 
 flamegraph: ## Generate flamegraph for profiling
 	@echo "$(GREEN)Generating flamegraph...$(NC)"
-	cargo flamegraph --bin rust-jwt-backend
+	cargo flamegraph --bin server
 	@echo "$(GREEN)✓ Flamegraph generated$(NC)"
 
 sqlx-prepare: ## Prepare SQLx offline queries

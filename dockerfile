@@ -41,10 +41,10 @@ COPY build.rs ./
 # Build the actual application
 # Use SQLX_OFFLINE=true to avoid database requirement during build
 ENV SQLX_OFFLINE=true
-RUN cargo build --release --bin rust-jwt-backend
+RUN cargo build --release --bin server
 
 # Strip binary to reduce size
-RUN strip target/release/rust-jwt-backend
+RUN strip target/release/server
 
 # ==============================================================================
 # Security Scanner Stage (Optional - can be used in CI/CD)
@@ -62,15 +62,15 @@ LABEL \
     maintainer="racasantos@icloud.com" \
     version="1.0.0" \
     description="Production-grade Rust JWT Backend" \
-    org.opencontainers.image.title="rust-jwt-backend" \
+    org.opencontainers.image.title="server" \
     org.opencontainers.image.description="Enterprise JWT authentication backend" \
     org.opencontainers.image.version="1.0.0" \
     org.opencontainers.image.vendor="Company Inc." \
     org.opencontainers.image.licenses="MIT" \
-    org.opencontainers.image.source="https://github.com/company/rust-jwt-backend"
+    org.opencontainers.image.source="https://github.com/zlovtnik/server"
 
 # Copy the binary from builder stage
-COPY --from=builder /app/target/release/rust-jwt-backend /usr/local/bin/rust-jwt-backend
+COPY --from=builder /app/target/release/server /usr/local/bin/server
 
 # Copy SSL certificates for HTTPS requests
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
@@ -89,7 +89,7 @@ EXPOSE 3000 3001
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD ["/usr/local/bin/rust-jwt-backend", "--health-check"] || exit 1
+    CMD ["/usr/local/bin/server", "--health-check"] || exit 1
 
 # Run the application
-ENTRYPOINT ["/usr/local/bin/rust-jwt-backend"]
+ENTRYPOINT ["/usr/local/bin/server"]

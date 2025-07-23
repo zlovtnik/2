@@ -1,6 +1,18 @@
 version: '3.8'
 
 services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"  # REST API
+      - "3001:3001"  # gRPC server
+    depends_on:
+      - postgres
+    environment:
+      - APP_DATABASE_URL=postgresql://postgres:password@postgres:5432/rust_jwt_db
+      - RUST_LOG=info
+    restart: unless-stopped
+
   postgres:
     image: postgres:15-alpine
     environment:
