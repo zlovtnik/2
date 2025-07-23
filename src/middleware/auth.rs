@@ -32,7 +32,7 @@ where
                     Ok(AuthenticatedUser(user_id))
                 },
                 Err(e) => {
-                    warn!(error = %e, "Authentication failed - invalid or expired token");
+                    error!(error = %e, "Authentication failed - invalid or expired token");
                     Err((StatusCode::UNAUTHORIZED, "Invalid or expired token"))
                 },
             }
