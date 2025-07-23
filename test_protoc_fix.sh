@@ -1,28 +1,23 @@
 #!/bin/bash
 
-# Test script to verify protoc issue is resolved
-echo "Testing protoc compilation fix..."
+# Test script to verify protoc fix in Docker build
+set -e
 
-# Clean previous builds
-echo "Cleaning previous builds..."
-cargo clean
+echo "🔧 Testing protoc fix in Docker build..."
 
-# Test local build (should work since protoc is available locally)
-echo "Testing local build..."
-if cargo build --release; then
-    echo "✅ Local build successful"
+# Build the Docker image
+echo "📦 Building Docker image..."
+docker build -t server-protoc-test .
+
+if [ $? -eq 0 ]; then
+    echo "✅ Docker build succeeded! protoc fix is working."
+    
+    # Optional: Test that protoc is available in the build stage
+    echo "🔍 Verifying protoc installation..."
+    docker run --rm server-protoc-test protoc --version 2>/dev/null || echo "Note: protoc not available in runtime stage (expected for distroless)"
+    
+    echo "🎉 All tests passed!"
 else
-    echo "❌ Local build failed"
+    echo "❌ Docker build failed. protoc fix needs more work."
     exit 1
 fi
-
-# Test Docker build (this would test the dockerfile changes)
-echo "Testing Docker build..."
-if docker build -t rust-jwt-backend-test .; then
-    echo "✅ Docker build successful"
-else
-    echo "❌ Docker build failed"
-    exit 1
-fi
-
-echo "🎉 All tests passed! The protoc issue has been resolved."

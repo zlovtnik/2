@@ -85,7 +85,7 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
 # Set security-focused environment variables
 ENV RUST_LOG=info
-ENV RUST_BACKTRACE=0
+ENV RUFST_BACKTRACE=0
 ENV ENVIRONMENT=production
 
 # Use non-root user (distroless default)
