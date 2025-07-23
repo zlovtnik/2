@@ -16,13 +16,21 @@ RUN apk add --no-cache \
     curl \
     unzip
 
-# Install protoc manually from official releases for better compatibility
-RUN PROTOC_VERSION=25.1 && \
+# Install protoc and required tools
+RUN apk add --no-cache protoc protobuf-dev && \
+    # Also install the binary from official release as a fallback
+    PROTOC_VERSION=25.1 && \
     PROTOC_ARCH=linux-x86_64 && \
-    curl -LO "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-${PROTOC_ARCH}.zip" && \
-    unzip "protoc-${PROTOC_VERSION}-${PROTOC_ARCH}.zip" -d /usr/local && \
-    rm "protoc-${PROTOC_VERSION}-${PROTOC_ARCH}.zip" && \
-    chmod +x /usr/local/bin/protoc
+    mkdir -p /tmp/protoc && \
+    cd /tmp/protoc && \
+    curl -sLO "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-${PROTOC_ARCH}.zip" && \
+    unzip -q "protoc-${PROTOC_VERSION}-${PROTOC_ARCH}.zip" -d /usr/local && \
+    chmod +x /usr/local/bin/protoc && \
+    rm -rf /tmp/protoc
+
+# Set environment variables for protoc
+ENV PROTOC=/usr/bin/protoc
+ENV PROTOC_INCLUDE="/usr/include:/usr/local/include"
 
 # Create app user for security
 RUN addgroup -g 1000 appgroup && \
