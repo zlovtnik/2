@@ -9,88 +9,46 @@ echo "Home directory: $HOME"
 
 # Install protoc if not already installed
 echo "=== Installing protoc ==="
-./scripts/install-protoc.sh
+if ! command -v protoc &> /dev/null; then
+    echo "protoc not found, installing via package manager..."
+    if command -v apt-get &> /dev/null; then
+        # Ubuntu/Debian systems
+        sudo apt-get update
+        sudo apt-get install -y protobuf-compiler
+    elif command -v yum &> /dev/null; then
+        # RHEL/CentOS systems
+        sudo yum install -y protobuf-compiler
+    elif command -v brew &> /dev/null; then
+        # macOS with Homebrew
+        brew install protobuf
+    else
+        echo "No supported package manager found. Falling back to manual installation..."
+        ./scripts/install-protoc.sh
+    fi
+else
+    echo "protoc is already installed: $(protoc --version)"
+fi
 
-# Set up environment variables - check multiple possible locations
+# Set up environment variables - use protoc from PATH
 echo "=== Setting up protoc environment ==="
 
-# Check common system locations first (before adding local bin to PATH)
-if [ -f "/opt/homebrew/bin/protoc" ] && /opt/homebrew/bin/protoc --version &> /dev/null; then
-    echo "Found working Homebrew protoc"
-    export PROTOC="/opt/homebrew/bin/protoc"
-    export PROTOC_INCLUDE="/opt/homebrew/include:/usr/include:/usr/local/include"
-elif [ -f "/usr/local/bin/protoc" ] && /usr/local/bin/protoc --version &> /dev/null; then
-    echo "Found working system protoc at /usr/local/bin"
-    export PROTOC="/usr/local/bin/protoc"
-    export PROTOC_INCLUDE="/usr/local/include:/usr/include"
-elif [ -f "/usr/bin/protoc" ] && /usr/bin/protoc --version &> /dev/null; then
-    echo "Found working system protoc at /usr/bin"
-    export PROTOC="/usr/bin/protoc"
-    export PROTOC_INCLUDE="/usr/include:/usr/local/include"
-else
-    # Check for locally installed protoc in various possible locations
-    # The install-protoc.sh script may have installed to alternative locations
+if command -v protoc &> /dev/null && protoc --version &> /dev/null; then
+    PROTOC_PATH=$(which protoc)
+    echo "Found protoc in PATH: $PROTOC_PATH"
+    export PROTOC="$PROTOC_PATH"
     
-    # First, try to find protoc in PATH (install-protoc.sh adds its location to PATH)
-    if command -v protoc &> /dev/null && protoc --version &> /dev/null; then
-        PROTOC_PATH=$(which protoc)
-        echo "Found protoc in PATH: $PROTOC_PATH"
-        export PROTOC="$PROTOC_PATH"
-        
-        # Determine include directory based on protoc location
-        PROTOC_DIR=$(dirname "$PROTOC_PATH")
-        PROTOC_BASE=$(dirname "$PROTOC_DIR")
-        if [ -d "$PROTOC_BASE/include" ]; then
-            export PROTOC_INCLUDE="$PROTOC_BASE/include:/usr/include:/usr/local/include"
-        else
-            export PROTOC_INCLUDE="/usr/include:/usr/local/include"
-        fi
+    # Set standard include paths for system-installed protoc
+    if [[ "$PROTOC_PATH" == "/opt/homebrew/bin/protoc" ]]; then
+        export PROTOC_INCLUDE="/opt/homebrew/include:/usr/include:/usr/local/include"
+    elif [[ "$PROTOC_PATH" == "/usr/local/bin/protoc" ]]; then
+        export PROTOC_INCLUDE="/usr/local/include:/usr/include"
     else
-        # Fallback: check specific locations including alternative install directories
-        PROTOC_LOCATIONS=(
-            "$HOME/.local/bin/protoc"
-            "./local/bin/protoc"
-            "/tmp/protoc-install/bin/protoc"
-        )
-        
-        FOUND_PROTOC=""
-        for location in "${PROTOC_LOCATIONS[@]}"; do
-            if [ -f "$location" ] && "$location" --version &> /dev/null; then
-                FOUND_PROTOC="$location"
-                break
-            fi
-        done
-        
-        if [ -n "$FOUND_PROTOC" ]; then
-            echo "Using locally installed protoc at: $FOUND_PROTOC"
-            export PROTOC="$FOUND_PROTOC"
-            
-            # Set include directory based on protoc location
-            PROTOC_DIR=$(dirname "$FOUND_PROTOC")
-            PROTOC_BASE=$(dirname "$PROTOC_DIR")
-            if [ -d "$PROTOC_BASE/include" ]; then
-                export PROTOC_INCLUDE="$PROTOC_BASE/include:/usr/include:/usr/local/include"
-            else
-                export PROTOC_INCLUDE="/usr/include:/usr/local/include"
-            fi
-            
-            # Add to PATH if not already there
-            if [[ ":$PATH:" != *":$PROTOC_DIR:"* ]]; then
-                export PATH="$PROTOC_DIR:$PATH"
-            fi
-        else
-            echo "Error: protoc not found in any expected location"
-            echo "Checked locations:"
-            echo "  - /opt/homebrew/bin/protoc: $([ -f "/opt/homebrew/bin/protoc" ] && echo 'exists' || echo 'not found')"
-            echo "  - /usr/local/bin/protoc: $([ -f "/usr/local/bin/protoc" ] && echo 'exists' || echo 'not found')"
-            echo "  - /usr/bin/protoc: $([ -f "/usr/bin/protoc" ] && echo 'exists' || echo 'not found')"
-            echo "  - $HOME/.local/bin/protoc: $([ -f "$HOME/.local/bin/protoc" ] && echo 'exists' || echo 'not found')"
-            echo "  - ./local/bin/protoc: $([ -f "./local/bin/protoc" ] && echo 'exists' || echo 'not found')"
-            echo "  - /tmp/protoc-install/bin/protoc: $([ -f "/tmp/protoc-install/bin/protoc" ] && echo 'exists' || echo 'not found')"
-            echo "PATH: $PATH"
-            exit 1
-        fi
+        export PROTOC_INCLUDE="/usr/include:/usr/local/include"
     fi
+else
+    echo "Error: protoc not found after installation"
+    echo "PATH: $PATH"
+    exit 1
 fi
 
 echo "Using protoc at: $PROTOC"

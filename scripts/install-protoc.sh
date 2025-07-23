@@ -11,8 +11,34 @@ fi
 # Install protoc if not already installed or not working
 echo "protoc not found or not working, installing..."
     PROTOC_VERSION=25.1
-    PROTOC_ARCH=linux-x86_64
+    
+    # Detect architecture
+    OS=$(uname -s)
+    ARCH=$(uname -m)
+    
+    case "$OS" in
+        Linux*)
+            case "$ARCH" in
+                x86_64) PROTOC_ARCH=linux-x86_64 ;;
+                aarch64|arm64) PROTOC_ARCH=linux-aarch_64 ;;
+                *) echo "Unsupported Linux architecture: $ARCH"; exit 1 ;;
+            esac
+            ;;
+        Darwin*)
+            case "$ARCH" in
+                x86_64) PROTOC_ARCH=osx-x86_64 ;;
+                arm64) PROTOC_ARCH=osx-aarch_64 ;;
+                *) echo "Unsupported macOS architecture: $ARCH"; exit 1 ;;
+            esac
+            ;;
+        *)
+            echo "Unsupported operating system: $OS"
+            exit 1
+            ;;
+    esac
+    
     PROTOC_ZIP=protoc-${PROTOC_VERSION}-${PROTOC_ARCH}.zip
+    echo "Detected system: $OS $ARCH, using protoc archive: $PROTOC_ZIP"
     
     # Determine installation directory - prefer $HOME/.local but fallback to writable alternatives
     INSTALL_DIR="$HOME/.local"
@@ -87,6 +113,8 @@ echo "protoc not found or not working, installing..."
     unzip -o ${PROTOC_ZIP}
     
     # Install to the determined directory (no sudo required)
+    # Remove existing protoc if it exists to avoid permission issues
+    rm -f "$INSTALL_DIR/bin/protoc" 2>/dev/null || true
     cp bin/protoc "$INSTALL_DIR/bin/protoc"
     cp -r include/* "$INSTALL_DIR/include/" 2>/dev/null || true
     chmod +x "$INSTALL_DIR/bin/protoc"
