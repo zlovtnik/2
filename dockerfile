@@ -4,7 +4,7 @@
 # ==============================================================================
 # Build Stage - Alpine Linux for smaller intermediate layers
 # ==============================================================================
-FROM rust:1.75-alpine AS builder
+FROM rust:1.83-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache \
@@ -25,7 +25,6 @@ WORKDIR /app
 
 # Copy dependency files first for better caching
 COPY Cargo.toml Cargo.lock ./
-COPY .sqlx/ ./.sqlx/
 
 # Create a dummy main.rs to build dependencies
 RUN mkdir src && \
