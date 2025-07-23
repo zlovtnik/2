@@ -2,10 +2,24 @@ use axum::{Json, extract::{Path, State}, response::IntoResponse};
 use uuid::Uuid;
 use crate::core::user::User;
 use crate::infrastructure::database::{Crud, PgCrud, UpdatableCrud};
-use sqlx::PgPool;
+use sqlx::{PgPool, FromRow};
 use axum::http::StatusCode;
 use crate::middleware::auth::AuthenticatedUser;
 use tracing::{info, warn, error, debug};
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+
+#[derive(Debug, Serialize, Deserialize, FromRow, ToSchema)]
+pub struct UserInfoWithStats {
+    pub user_id: Uuid,
+    pub email: String,
+    pub full_name: String,
+    pub preferences: Option<serde_json::Value>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub refresh_token_count: i64,
+    pub last_login: Option<chrono::DateTime<chrono::Utc>>,
+}
 
 fn user_crud_box(pool: PgPool) -> Box<dyn Crud<User, Uuid> + Send + Sync> {
     Box::new(PgCrud::new(pool, "users"))
@@ -115,6 +129,50 @@ pub async fn get_current_user(AuthenticatedUser(user_id): AuthenticatedUser, Sta
         Err(e) => {
             error!(user_id = %user_id, error = %e, "Failed to retrieve current user");
             (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {}", e)).into_response()
+        },
+    }
+}
+
+/// Get current user information with statistics using PostgreSQL procedure
+/// This endpoint demonstrates calling a PostgreSQL procedure with the authenticated user's token
+pub async fn get_current_user_stats(
+    AuthenticatedUser(user_id): AuthenticatedUser, 
+    State(pool): State<PgPool>
+) -> impl IntoResponse {
+    info!(user_id = %user_id, "Getting current user stats via PostgreSQL procedure");
+    debug!("Calling get_user_info_with_stats procedure");
+    
+    // Call the PostgreSQL procedure with the authenticated user's ID
+    let query = "SELECT * FROM get_user_info_with_stats($1)";
+    
+    match sqlx::query_as::<_, UserInfoWithStats>(query)
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await
+    {
+        Ok(user_stats) => {
+            info!(
+                user_id = %user_id, 
+                email = %user_stats.email,
+                refresh_token_count = user_stats.refresh_token_count,
+                "User stats retrieved successfully via procedure"
+            );
+            debug!(
+                full_name = %user_stats.full_name,
+                created_at = %user_stats.created_at,
+                last_login = ?user_stats.last_login,
+                "Detailed user stats from procedure"
+            );
+            (StatusCode::OK, Json(user_stats)).into_response()
+        },
+        Err(e) => {
+            error!(user_id = %user_id, error = %e, "Failed to retrieve user stats via procedure");
+            if e.to_string().contains("not found") {
+                warn!(user_id = %user_id, "User not found in procedure call");
+                (StatusCode::NOT_FOUND, "User not found").into_response()
+            } else {
+                (StatusCode::INTERNAL_SERVER_ERROR, format!("Procedure error: {}", e)).into_response()
+            }
         },
     }
 }
