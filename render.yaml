@@ -15,10 +15,9 @@ services:
       chmod +x scripts/*.sh
       # Run the build script
       ./scripts/build.sh
-    startCommand: ./target/release/server
+    startCommand: /usr/local/bin/server
     envVars:
       - key: PROTOC
         value: /usr/bin/protoc
       - key: PROTOC_INCLUDE
         value: "/usr/include:/usr/local/include"
-    env: rust
