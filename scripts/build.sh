@@ -79,33 +79,16 @@ if command -v protoc &> /dev/null && protoc --version &> /dev/null; then
     echo "Found protoc in PATH: $PROTOC_PATH"
     export PROTOC="$PROTOC_PATH"
     
-    # Set standard include paths for system-installed protoc, but only include existing directories
-    POTENTIAL_INCLUDES=()
-    if [[ "$PROTOC_PATH" == "/opt/homebrew/bin/protoc" ]]; then
-        POTENTIAL_INCLUDES+=("/opt/homebrew/include")
-    elif [[ "$PROTOC_PATH" == "/usr/local/bin/protoc" ]]; then
-        POTENTIAL_INCLUDES+=("/usr/local/include")
-    fi
+    # Only include the protoc installation's include directory
+    PROTOC_INSTALL_DIR=$(dirname "$(dirname "$PROTOC_PATH")")
+    LOCAL_INCLUDE="$PROTOC_INSTALL_DIR/include"
     
-    # Only add system directories if they exist
-    [ -d "/usr/include" ] && POTENTIAL_INCLUDES+=("/usr/include")
-    [ -d "/usr/local/include" ] && POTENTIAL_INCLUDES+=("/usr/local/include")
-    
-    # Build PROTOC_INCLUDE with only existing directories
-    EXISTING_INCLUDES=()
-    for include_dir in "${POTENTIAL_INCLUDES[@]}"; do
-        if [ -d "$include_dir" ]; then
-            EXISTING_INCLUDES+=("$include_dir")
-        fi
-    done
-    
-    # Join the existing directories with colons
-    if [ ${#EXISTING_INCLUDES[@]} -gt 0 ]; then
-        export PROTOC_INCLUDE=$(IFS=:; echo "${EXISTING_INCLUDES[*]}")
+    if [ -d "$LOCAL_INCLUDE" ]; then
+        export PROTOC_INCLUDE="$LOCAL_INCLUDE"
         echo "Set PROTOC_INCLUDE to: $PROTOC_INCLUDE"
     else
-        # If no standard directories exist, don't set PROTOC_INCLUDE
-        echo "Warning: No standard include directories found, PROTOC_INCLUDE will not be set"
+        # If the include directory doesn't exist, don't set PROTOC_INCLUDE
+        echo "Warning: Protoc include directory not found at $LOCAL_INCLUDE, PROTOC_INCLUDE will not be set"
         unset PROTOC_INCLUDE
     fi
 else
@@ -130,27 +113,15 @@ else
             export PATH="$PROTOC_DIR:$PATH"
             export PROTOC="$PROTOC_CANDIDATE"
             
-            # Set include path based on installation directory, but only include existing directories
-            POTENTIAL_INCLUDES=()
-            [ -d "$INSTALL_DIR/include" ] && POTENTIAL_INCLUDES+=("$INSTALL_DIR/include")
-            [ -d "/usr/include" ] && POTENTIAL_INCLUDES+=("/usr/include")
-            [ -d "/usr/local/include" ] && POTENTIAL_INCLUDES+=("/usr/local/include")
+            # Only include the protoc installation's include directory
+            LOCAL_INCLUDE="$INSTALL_DIR/include"
             
-            # Build PROTOC_INCLUDE with only existing directories
-            EXISTING_INCLUDES=()
-            for include_dir in "${POTENTIAL_INCLUDES[@]}"; do
-                if [ -d "$include_dir" ]; then
-                    EXISTING_INCLUDES+=("$include_dir")
-                fi
-            done
-            
-            # Join the existing directories with colons
-            if [ ${#EXISTING_INCLUDES[@]} -gt 0 ]; then
-                export PROTOC_INCLUDE=$(IFS=:; echo "${EXISTING_INCLUDES[*]}")
+            if [ -d "$LOCAL_INCLUDE" ]; then
+                export PROTOC_INCLUDE="$LOCAL_INCLUDE"
                 echo "Set PROTOC_INCLUDE to: $PROTOC_INCLUDE"
             else
-                # If no include directories exist, don't set PROTOC_INCLUDE
-                echo "Warning: No include directories found, PROTOC_INCLUDE will not be set"
+                # If the include directory doesn't exist, don't set PROTOC_INCLUDE
+                echo "Warning: Protoc include directory not found at $LOCAL_INCLUDE, PROTOC_INCLUDE will not be set"
                 unset PROTOC_INCLUDE
             fi
             
