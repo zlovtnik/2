@@ -308,6 +308,47 @@ sqlx-prepare: ## Prepare SQLx offline queries
 	cargo sqlx prepare
 	@echo "$(GREEN)✓ SQLx queries prepared$(NC)"
 
+## Render Deployment
+
+deploy-render: ## Deploy to Render
+	@echo "$(GREEN)Deploying to Render...$(NC)"
+	@if [ -z "$(SERVICE_ID)" ]; then \
+		echo "$(YELLOW)No SERVICE_ID specified, using interactive mode$(NC)"; \
+		render deploys create --wait --confirm; \
+	else \
+		echo "$(GREEN)Deploying service $(SERVICE_ID)...$(NC)"; \
+		render deploys create $(SERVICE_ID) --wait --confirm; \
+	fi
+	@echo "$(GREEN)✓ Deployed to Render$(NC)"
+
+deploy-render-prod: ## Deploy to Render production with confirmation
+	@echo "$(YELLOW)Deploying to Render PRODUCTION...$(NC)"
+	@read -p "Are you sure you want to deploy to production? [y/N] " -n 1 -r; \
+	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
+		echo ""; \
+		echo "$(GREEN)Deploying to production...$(NC)"; \
+		if [ -z "$(SERVICE_ID)" ]; then \
+			render deploys create --wait --confirm; \
+		else \
+			render deploys create $(SERVICE_ID) --wait --confirm; \
+		fi; \
+		echo "$(GREEN)✓ Deployed to Render production$(NC)"; \
+	else \
+		echo ""; \
+		echo "$(RED)Production deployment cancelled$(NC)"; \
+	fi
+
+deploy-render-clear-cache: ## Deploy to Render with cleared build cache
+	@echo "$(GREEN)Deploying to Render with cleared cache...$(NC)"
+	@if [ -z "$(SERVICE_ID)" ]; then \
+		echo "$(YELLOW)No SERVICE_ID specified, using interactive mode$(NC)"; \
+		render deploys create --clear-cache --wait --confirm; \
+	else \
+		echo "$(GREEN)Deploying service $(SERVICE_ID) with cleared cache...$(NC)"; \
+		render deploys create $(SERVICE_ID) --clear-cache --wait --confirm; \
+	fi
+	@echo "$(GREEN)✓ Deployed to Render with cleared cache$(NC)"
+
 ## Full Workflow
 
 full-test: clean build test-unit test-integration security lint ## Run complete test suite
