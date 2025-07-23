@@ -44,7 +44,3 @@ echo "protoc not found or not working, installing..."
     echo "protoc ${PROTOC_VERSION} installed successfully"
     echo "protoc location: $HOME/.local/bin/protoc"
     echo "protoc version: $($HOME/.local/bin/protoc --version)"
-else
-    echo "protoc is already installed: $(protoc --version)"
-    echo "protoc location: $(which protoc)"
-fi
