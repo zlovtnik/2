@@ -300,7 +300,7 @@ benchmark: ## Run performance benchmarks
 
 flamegraph: ## Generate flamegraph for profiling
 	@echo "$(GREEN)Generating flamegraph...$(NC)"
-	cargo flamegraph --bin server
+	cargo flamegraph --bin rust-jwt-backend
 	@echo "$(GREEN)✓ Flamegraph generated$(NC)"
 
 sqlx-prepare: ## Prepare SQLx offline queries

@@ -380,9 +380,9 @@ FROM rust:1.75-alpine AS builder
 # ... build steps ...
 
 FROM gcr.io/distroless/cc
-COPY --from=builder /app/target/release/server /
+COPY --from=builder /app/target/release/rust-jwt-backend /
 EXPOSE 3000
-ENTRYPOINT ["/server"]
+ENTRYPOINT ["/rust-jwt-backend"]
 ```
 
 ### Kubernetes

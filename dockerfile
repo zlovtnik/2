@@ -83,8 +83,9 @@ ENV ENVIRONMENT=production
 # Use non-root user (distroless default)
 USER nonroot:nonroot
 
-# Expose port (should match your application configuration)
-EXPOSE 3000
+# Expose ports (should match your application configuration)
+# Port 3000 for REST API, Port 3001 for gRPC server
+EXPOSE 3000 3001
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
