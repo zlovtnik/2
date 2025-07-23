@@ -4,7 +4,7 @@
 # ==============================================================================
 # Build Stage - Alpine Linux for smaller intermediate layers
 # ==============================================================================
-FROM rust:1.83-alpine AS builder
+FROM rustlang/rust:nightly-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache \
@@ -41,10 +41,10 @@ COPY build.rs ./
 # Build the actual application
 # Use SQLX_OFFLINE=true to avoid database requirement during build
 ENV SQLX_OFFLINE=true
-RUN cargo build --release --bin server
+RUN cargo build --release --bin rust-jwt-backend
 
 # Strip binary to reduce size
-RUN strip target/release/server
+RUN strip target/release/rust-jwt-backend
 
 # ==============================================================================
 # Security Scanner Stage (Optional - can be used in CI/CD)
@@ -70,7 +70,7 @@ LABEL \
     org.opencontainers.image.source="https://github.com/company/rust-jwt-backend"
 
 # Copy the binary from builder stage
-COPY --from=builder /app/target/release/server /usr/local/bin/server
+COPY --from=builder /app/target/release/rust-jwt-backend /usr/local/bin/rust-jwt-backend
 
 # Copy SSL certificates for HTTPS requests
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
@@ -88,7 +88,7 @@ EXPOSE 3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD ["/usr/local/bin/server", "--health-check"] || exit 1
+    CMD ["/usr/local/bin/rust-jwt-backend", "--health-check"] || exit 1
 
 # Run the application
 ENTRYPOINT ["/usr/local/
