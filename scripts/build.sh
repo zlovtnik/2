@@ -73,6 +73,7 @@ fi
 # Set up environment variables - use protoc from PATH
 echo "=== Setting up protoc environment ==="
 
+# First check if protoc is already in PATH
 if command -v protoc &> /dev/null && protoc --version &> /dev/null; then
     PROTOC_PATH=$(which protoc)
     echo "Found protoc in PATH: $PROTOC_PATH"
@@ -87,9 +88,48 @@ if command -v protoc &> /dev/null && protoc --version &> /dev/null; then
         export PROTOC_INCLUDE="/usr/include:/usr/local/include"
     fi
 else
-    echo "Error: protoc not found after installation"
-    echo "PATH: $PATH"
-    exit 1
+    # If not in PATH, check common installation directories from install-protoc.sh
+    echo "protoc not found in PATH, checking common installation directories..."
+    
+    # Check the directories that install-protoc.sh uses in order of preference
+    POTENTIAL_PATHS=(
+        "$HOME/.local/bin/protoc"
+        "$(pwd)/local/bin/protoc"
+        "/tmp/protoc-install/bin/protoc"
+    )
+    
+    PROTOC_FOUND=false
+    for PROTOC_CANDIDATE in "${POTENTIAL_PATHS[@]}"; do
+        if [ -f "$PROTOC_CANDIDATE" ] && [ -x "$PROTOC_CANDIDATE" ]; then
+            echo "Found protoc at: $PROTOC_CANDIDATE"
+            PROTOC_DIR=$(dirname "$PROTOC_CANDIDATE")
+            INSTALL_DIR=$(dirname "$PROTOC_DIR")
+            
+            # Add to PATH
+            export PATH="$PROTOC_DIR:$PATH"
+            export PROTOC="$PROTOC_CANDIDATE"
+            
+            # Set include path based on installation directory
+            if [ -d "$INSTALL_DIR/include" ]; then
+                export PROTOC_INCLUDE="$INSTALL_DIR/include:/usr/include:/usr/local/include"
+            else
+                export PROTOC_INCLUDE="/usr/include:/usr/local/include"
+            fi
+            
+            PROTOC_FOUND=true
+            break
+        fi
+    done
+    
+    if [ "$PROTOC_FOUND" = false ]; then
+        echo "Error: protoc not found after installation"
+        echo "PATH: $PATH"
+        echo "Checked locations:"
+        for path in "${POTENTIAL_PATHS[@]}"; do
+            echo "  - $path"
+        done
+        exit 1
+    fi
 fi
 
 echo "Using protoc at: $PROTOC"
