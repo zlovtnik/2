@@ -349,6 +349,44 @@ deploy-render-clear-cache: ## Deploy to Render with cleared build cache
 	fi
 	@echo "$(GREEN)✓ Deployed to Render with cleared cache$(NC)"
 
+## Streamlit Deployment
+
+streamlit-install: ## Install Python dependencies for Streamlit
+	@echo "$(GREEN)Installing Python dependencies...$(NC)"
+	pip install -r requirements.txt
+	@echo "$(GREEN)✓ Python dependencies installed$(NC)"
+
+streamlit-run: ## Run Streamlit app locally
+	@echo "$(GREEN)Starting Streamlit app...$(NC)"
+	@echo "$(YELLOW)Make sure your Rust backend is running on http://localhost:3000$(NC)"
+	streamlit run app.py
+	@echo "$(GREEN)✓ Streamlit app started$(NC)"
+
+streamlit-test: ## Test Streamlit app locally
+	@echo "$(GREEN)Testing Streamlit app...$(NC)"
+	@echo "$(YELLOW)Starting Streamlit in headless mode for testing...$(NC)"
+	streamlit run app.py --server.headless true --server.port 8502 &
+	@sleep 5
+	@curl -f http://localhost:8502 > /dev/null && echo "$(GREEN)✅ Streamlit app is responding$(NC)" || echo "$(RED)❌ Streamlit app failed to start$(NC)"
+	@pkill -f "streamlit run app.py" || true
+
+streamlit-deploy-prep: ## Prepare for Streamlit.io deployment
+	@echo "$(GREEN)Preparing for Streamlit.io deployment...$(NC)"
+	@echo "$(YELLOW)Checking required files...$(NC)"
+	@test -f app.py && echo "✅ app.py found" || (echo "❌ app.py missing" && exit 1)
+	@test -f requirements.txt && echo "✅ requirements.txt found" || (echo "❌ requirements.txt missing" && exit 1)
+	@echo "$(GREEN)✓ All required files present for Streamlit.io deployment$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Deployment Instructions:$(NC)"
+	@echo "1. Push your code to GitHub"
+	@echo "2. Go to https://share.streamlit.io/"
+	@echo "3. Connect your GitHub repository"
+	@echo "4. Set main file path to: app.py"
+	@echo "5. Deploy!"
+	@echo ""
+	@echo "$(YELLOW)Note: Make sure your Rust backend is deployed and accessible$(NC)"
+	@echo "$(YELLOW)Update the API_BASE_URL in the Streamlit app accordingly$(NC)"
+
 ## Full Workflow
 
 full-test: clean build test-unit test-integration security lint ## Run complete test suite
@@ -365,3 +403,6 @@ deploy-staging: build docker-build docker-push ## Deploy to staging
 production-ready: full-test docker-build ## Prepare for production deployment
 	@echo "$(GREEN)Production readiness check complete$(NC)"
 	@echo "$(YELLOW)Ready for production deployment with: make k8s-deploy-prod$(NC)"
+
+streamlit-full-setup: streamlit-install streamlit-deploy-prep ## Complete Streamlit setup and deployment preparation
+	@echo "$(GREEN)✓ Streamlit setup complete and ready for deployment$(NC)"
