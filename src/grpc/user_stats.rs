@@ -70,6 +70,7 @@ impl UserStatsService for UserStatsServiceImpl {
         &self,
         request: Request<GetCurrentUserStatsRequest>,
     ) -> Result<Response<GetCurrentUserStatsResponse>, Status> {
+        let start_time = std::time::Instant::now();
         info!("gRPC GetCurrentUserStats called");
         
         // Extract and verify JWT token
@@ -112,10 +113,23 @@ impl UserStatsService for UserStatsServiceImpl {
                     last_login: user_stats.last_login.map(|dt| dt.to_rfc3339()),
                 };
 
+                let duration = start_time.elapsed();
+                info!(
+                    user_id = %user_id,
+                    duration_ms = duration.as_millis(),
+                    "gRPC GetCurrentUserStats completed successfully"
+                );
+
                 Ok(Response::new(response))
             },
             Err(e) => {
-                error!(user_id = %user_id, error = %e, "Failed to retrieve user stats via gRPC procedure");
+                let duration = start_time.elapsed();
+                error!(
+                    user_id = %user_id, 
+                    error = %e, 
+                    duration_ms = duration.as_millis(),
+                    "Failed to retrieve user stats via gRPC procedure"
+                );
                 if e.to_string().contains("not found") {
                     warn!(user_id = %user_id, "User not found in gRPC procedure call");
                     Err(Status::not_found("User not found"))
