@@ -2,9 +2,15 @@ services:
   - type: web
     name: server
     env: rust
+    port: 3000
     buildCommand: |
       # Make build scripts executable
       chmod +x scripts/*.sh
       # Run the build script
       ./scripts/build.sh
     startCommand: ./target/release/server
+    envVars:
+      - key: PORT
+        value: 3000
+      - key: RENDER
+        value: true
