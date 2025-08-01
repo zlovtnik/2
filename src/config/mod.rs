@@ -8,11 +8,16 @@ pub fn load() -> Config {
     info!("Loading application configuration");
     debug!("Configuration loading started");
     
-    // TODO: Load from env or file
-    let config = Config { server_port: 3000 };
+    // Load server port from environment variable or use default
+    let server_port = std::env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok())
+        .unwrap_or(3000);
+    
+    let config = Config { server_port };
     
     info!(server_port = config.server_port, "Configuration loaded successfully");
-    debug!("Using default configuration values");
+    debug!("Using port from environment or default value");
     
     config
 }
