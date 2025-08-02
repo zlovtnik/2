@@ -2,7 +2,6 @@ services:
   - type: web
     name: server
     env: rust
-    port: 3000
     buildCommand: |
       # Make build scripts executable
       chmod +x scripts/*.sh
@@ -10,7 +9,8 @@ services:
       ./scripts/build.sh
     startCommand: ./target/release/server
     envVars:
-      - key: PORT
-        value: 3000
       - key: RENDER
         value: true
+      - key: ENABLE_GRPC
+        value: false
+    runtime: rust
