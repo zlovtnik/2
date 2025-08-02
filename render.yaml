@@ -12,5 +12,5 @@ services:
       - key: RENDER
         value: true
       - key: ENABLE_GRPC
-        value: false
+        value: true
     runtime: rust
