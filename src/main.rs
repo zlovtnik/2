@@ -23,13 +23,14 @@ async fn main() {
     let rest_addr = SocketAddr::from(([0, 0, 0, 0], config.server_port));
     tracing::info!("Starting REST API server on {}", rest_addr);
     
-    // Check if gRPC server should be enabled (disabled on Render by default)
-    let enable_grpc = std::env::var("ENABLE_GRPC")
-        .map(|v| v.to_lowercase() == "true")
-        .unwrap_or_else(|_| {
-            // Enable gRPC by default in local development, disable on Render
+    // Check if gRPC server should be enabled
+    let enable_grpc = match std::env::var("ENABLE_GRPC") {
+        Ok(val) => val.to_lowercase() == "true",
+        Err(_) => {
+            // Enable gRPC by default in local development, disable on Render only if ENABLE_GRPC is not explicitly set
             std::env::var("RENDER").is_err()
-        });
+        }
+    };
     
     if enable_grpc {
         tracing::info!("gRPC server enabled");

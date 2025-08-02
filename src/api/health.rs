@@ -15,7 +15,7 @@ pub async fn live() -> impl IntoResponse {
 }
 
 pub async fn ready(State(pool): State<PgPool>) -> impl IntoResponse {
-    let (db_status, db_error) = match sqlx::query("SELECT 1").fetch_one(&pool).await {
+    let (db_status, db_error) = match sqlx::query_scalar::<_, i32>("SELECT 1").fetch_one(&pool).await {
         Ok(_) => ("ok", None),
         Err(e) => {
             error!(error = %e, "Database health check failed");
