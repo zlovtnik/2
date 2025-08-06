@@ -1,19 +1,32 @@
-# Enterprise Rust JWT Backend
+# Enterprise Kitchen Management System
 
-[![CI/CD](https://github.com/company/rust-jwt-backend/workflows/CI/badge.svg)](https://github.com/company/rust-jwt-backend/actions)
-[![Security Audit](https://github.com/company/rust-jwt-backend/workflows/Security%20Audit/badge.svg)](https://github.com/company/rust-jwt-backend/actions)
-[![Coverage](https://codecov.io/gh/company/rust-jwt-backend/branch/main/graph/badge.svg)](https://codecov.io/gh/company/rust-jwt-backend)
+[![CI/CD](https://github.com/zlovtnik/2/workflows/CI/badge.svg)](https://github.com/zlovtnik/2/actions)
+[![Security Audit](https://github.com/zlovtnik/2/workflows/Security%20Audit/badge.svg)](https://github.com/zlovtnik/2/actions)
+[![Coverage](https://codecov.io/gh/zlovtnik/2/branch/main/graph/badge.svg)](https://codecov.io/gh/zlovtnik/2)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A production-grade, enterprise-ready JWT authentication backend built with Rust, featuring comprehensive security, observability, and scalability patterns.
+A production-grade, enterprise-ready kitchen management system built with Rust, featuring comprehensive restaurant operations, real-time order management, inventory tracking, and staff coordination with advanced security and observability patterns.
 
 ## 🚀 Features
 
-### Core Functionality
+### Kitchen Management Core
+- **Menu Management** - Digital menu creation, pricing, ingredient tracking, and seasonal updates
+- **Order Processing** - Real-time order management from receipt to completion
+- **Inventory Control** - Automated stock tracking, low-stock alerts, and supplier integration
+- **Staff Coordination** - Role-based access, shift management, and task assignment
+- **Table Management** - Reservation system, table status tracking, and seating optimization
+
+### Authentication & Security
 - **JWT Authentication** - Secure token-based authentication with refresh tokens
 - **User Management** - Registration, login, profile management with role-based access
 - **PostgreSQL Integration** - Type-safe database operations with connection pooling
 - **Password Security** - Argon2 hashing with configurable parameters
+
+### Real-time Operations
+- **WebSocket Integration** - Live order updates and kitchen display systems
+- **gRPC Services** - High-performance inter-service communication
+- **Mobile API** - Native mobile app support for staff and management
+- **Kitchen Display** - Real-time order status and preparation tracking
 
 ### Enterprise Features
 - **Distributed Tracing** - OpenTelemetry integration with Jaeger/Zipkin
@@ -452,25 +465,307 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 Please report security vulnerabilities to security@company.com. Do not use public issue trackers for security-related problems.
 
-## 🗺️ Roadmap
+## 🗺️ Development Roadmap - Kitchen Management Enhancement
 
-### Q1 2024
-- [ ] gRPC API support
-- [ ] GraphQL endpoint
-- [ ] Multi-factor authentication
-- [ ] Advanced rate limiting strategies
+### 📋 24 Prioritized Enhancement Tasks
 
-### Q2 2024
-- [ ] Kafka event streaming
-- [ ] Advanced analytics dashboard
-- [ ] Mobile SDK integration
-- [ ] Federated authentication (SAML/OIDC)
+This roadmap transforms our JWT authentication backend into a comprehensive kitchen management system. Each task is designed to build upon existing infrastructure while adding restaurant-specific functionality.
 
-### Q3 2024
-- [ ] Machine learning fraud detection
-- [ ] Advanced audit capabilities
-- [ ] Multi-region deployment
-- [ ] Performance optimizations
+#### 🧪 Testing (3 tasks)
+
+**T1: Add unit tests for core business logic (user authentication, menu management)**
+- **Priority**: High 
+- **Estimated effort**: 3-5 days
+- **Dependencies**: None
+- **Description**: Implement comprehensive unit tests for authentication services, menu CRUD operations, and user management functions
+- **Acceptance criteria**: 
+  - 90%+ code coverage for core modules
+  - Tests for authentication flows, menu validation, and user role management
+  - CI integration with automated test execution
+
+**T2: Implement integration tests for API endpoints**
+- **Priority**: High
+- **Estimated effort**: 4-6 days  
+- **Dependencies**: T1
+- **Description**: Create end-to-end integration tests for all REST API endpoints including authentication, menu management, and user operations
+- **Acceptance criteria**:
+  - Full API endpoint coverage
+  - Database integration testing
+  - Mock external service dependencies
+
+**T3: Set up end-to-end test scenarios for critical user flows**
+- **Priority**: Medium
+- **Estimated effort**: 5-7 days
+- **Dependencies**: T1, T2
+- **Description**: Implement E2E tests for complete user journeys: staff login → order creation → kitchen workflow → completion
+- **Acceptance criteria**:
+  - Automated browser testing for frontend
+  - Complete workflow validation
+  - Performance benchmarking integration
+
+#### 📚 Documentation (3 tasks)
+
+**D1: Add comprehensive inline documentation for all public APIs**
+- **Priority**: High
+- **Estimated effort**: 2-3 days
+- **Dependencies**: None
+- **Description**: Document all public functions, structs, and API endpoints with comprehensive rustdoc comments
+- **Acceptance criteria**:
+  - All public APIs documented with examples
+  - OpenAPI/Swagger documentation generation
+  - Code examples for common use cases
+
+**D2: Create Architecture Decision Records (ADRs) for key technical decisions**
+- **Priority**: Medium
+- **Estimated effort**: 3-4 days
+- **Dependencies**: None
+- **Description**: Document architectural decisions, technology choices, and design patterns used in the kitchen management system
+- **Acceptance criteria**:
+  - ADRs for database design, authentication strategy, and microservices architecture
+  - Decision rationale and alternatives considered
+  - Template for future ADRs
+
+**D3: Develop API usage examples and update README with setup instructions**
+- **Priority**: Medium
+- **Estimated effort**: 2-3 days
+- **Dependencies**: D1
+- **Description**: Create comprehensive examples for API usage, including kitchen-specific workflows and integration patterns
+- **Acceptance criteria**:
+  - Complete setup guide for development environment
+  - API usage examples with curl and code samples
+  - Deployment documentation for production
+
+#### ⚡ Performance (3 tasks)
+
+**P1: Implement connection pooling for gRPC services**
+- **Priority**: High
+- **Estimated effort**: 3-4 days
+- **Dependencies**: None
+- **Description**: Optimize gRPC communication with connection pooling for better performance under load
+- **Acceptance criteria**:
+  - Configurable connection pool size
+  - Connection health monitoring
+  - Performance benchmarks showing improvement
+
+**P2: Integrate Redis for caching frequently accessed data**
+- **Priority**: High
+- **Estimated effort**: 4-5 days
+- **Dependencies**: None
+- **Description**: Implement Redis caching for menu items, user sessions, and frequently accessed restaurant data
+- **Acceptance criteria**:
+  - Cache invalidation strategies
+  - TTL configuration for different data types
+  - Cache hit ratio monitoring
+
+**P3: Add request batching for bulk operations**
+- **Priority**: Medium
+- **Estimated effort**: 3-4 days
+- **Dependencies**: P2
+- **Description**: Implement batching for bulk menu updates, order processing, and inventory operations
+- **Acceptance criteria**:
+  - Batch processing for menu updates
+  - Bulk order status updates
+  - Performance improvements for large datasets
+
+#### 🔒 Security (3 tasks)
+
+**S1: Implement request/response validation middleware**
+- **Priority**: High
+- **Estimated effort**: 3-4 days
+- **Dependencies**: None
+- **Description**: Add comprehensive input validation and sanitization for all API endpoints
+- **Acceptance criteria**:
+  - Schema validation for all request payloads
+  - Input sanitization to prevent injection attacks
+  - Detailed validation error responses
+
+**S2: Add rate limiting per endpoint with Redis**
+- **Priority**: High
+- **Estimated effort**: 2-3 days
+- **Dependencies**: P2
+- **Description**: Implement granular rate limiting per endpoint and user role using Redis
+- **Acceptance criteria**:
+  - Configurable rate limits per endpoint
+  - Different limits for different user roles
+  - Rate limit monitoring and alerting
+
+**S3: Configure security headers and CORS policies**
+- **Priority**: Medium
+- **Estimated effort**: 1-2 days
+- **Dependencies**: None
+- **Description**: Implement comprehensive security headers and CORS policies for web security
+- **Acceptance criteria**:
+  - Security headers (CSP, HSTS, etc.)
+  - Configurable CORS policies
+  - Security header testing and validation
+
+#### 🍽️ Core Features (5 tasks)
+
+**CF1: Develop menu management system (CRUD operations)**
+- **Priority**: Critical
+- **Estimated effort**: 8-10 days
+- **Dependencies**: S1
+- **Description**: Build comprehensive menu management with items, categories, pricing, ingredients, and nutritional information
+- **Acceptance criteria**:
+  - Full CRUD operations for menu items
+  - Category and subcategory management
+  - Ingredient tracking and allergen information
+  - Pricing and availability management
+
+**CF2: Build inventory tracking system**
+- **Priority**: Critical
+- **Estimated effort**: 10-12 days
+- **Dependencies**: CF1
+- **Description**: Implement real-time inventory tracking with automatic reorder points and supplier integration
+- **Acceptance criteria**:
+  - Real-time stock level tracking
+  - Low-stock alerts and automatic reordering
+  - Supplier management and purchase orders
+  - Inventory reports and analytics
+
+**CF3: Implement order management workflow**
+- **Priority**: Critical
+- **Estimated effort**: 12-15 days
+- **Dependencies**: CF1, CF2
+- **Description**: Create complete order lifecycle from creation to completion with status tracking
+- **Acceptance criteria**:
+  - Order creation and modification
+  - Kitchen workflow integration
+  - Status tracking and updates
+  - Order history and reporting
+
+**CF4: Create staff management with role-based access**
+- **Priority**: High
+- **Estimated effort**: 6-8 days
+- **Dependencies**: S1
+- **Description**: Implement comprehensive staff management with roles, permissions, and shift scheduling
+- **Acceptance criteria**:
+  - Role-based access control (Chef, Server, Manager, etc.)
+  - Shift scheduling and management
+  - Staff performance tracking
+  - Permission management system
+
+**CF5: Design table/reservation system**
+- **Priority**: High
+- **Estimated effort**: 8-10 days
+- **Dependencies**: CF4
+- **Description**: Build table management and reservation system with real-time availability
+- **Acceptance criteria**:
+  - Table layout and capacity management
+  - Reservation booking and management
+  - Real-time table status updates
+  - Waitlist and notification system
+
+#### 🔧 Technical Enhancements (4 tasks)
+
+**TE1: Add WebSockets for real-time order updates**
+- **Priority**: High
+- **Estimated effort**: 5-7 days
+- **Dependencies**: CF3
+- **Description**: Implement WebSocket connections for real-time order status updates across kitchen and front-of-house
+- **Acceptance criteria**:
+  - Real-time order status broadcasting
+  - Kitchen display system integration
+  - Connection management and reconnection logic
+  - Scalable WebSocket architecture
+
+**TE2: Develop mobile app API endpoints**
+- **Priority**: High
+- **Estimated effort**: 6-8 days
+- **Dependencies**: CF1, CF3, CF4
+- **Description**: Create mobile-optimized API endpoints for staff applications and management tools
+- **Acceptance criteria**:
+  - Mobile-optimized response formats
+  - Offline capability support
+  - Push notification integration
+  - Mobile authentication flows
+
+**TE3: Build kitchen display system interface**
+- **Priority**: High
+- **Estimated effort**: 7-9 days
+- **Dependencies**: CF3, TE1
+- **Description**: Create dedicated interface for kitchen display systems showing orders, timing, and preparation status
+- **Acceptance criteria**:
+  - Real-time order display
+  - Preparation time tracking
+  - Kitchen workflow optimization
+  - Multi-screen support
+
+**TE4: Implement reporting and analytics dashboard**
+- **Priority**: Medium
+- **Estimated effort**: 8-10 days
+- **Dependencies**: CF1, CF2, CF3
+- **Description**: Build comprehensive analytics dashboard with sales, inventory, and performance metrics
+- **Acceptance criteria**:
+  - Sales reporting and analytics
+  - Inventory turnover analysis
+  - Staff performance metrics
+  - Customizable dashboard views
+
+#### 🚀 Operational Improvements (3 tasks)
+
+**OI1: Set up CI/CD pipeline with GitHub Actions**
+- **Priority**: High
+- **Estimated effort**: 3-4 days
+- **Dependencies**: T1, T2
+- **Description**: Implement comprehensive CI/CD pipeline with automated testing, security scanning, and deployment
+- **Acceptance criteria**:
+  - Automated testing on pull requests
+  - Security vulnerability scanning
+  - Automated deployment to staging/production
+  - Rollback capabilities
+
+**OI2: Implement feature flags for gradual rollouts**
+- **Priority**: Medium
+- **Estimated effort**: 4-5 days
+- **Dependencies**: OI1
+- **Description**: Add feature flag system for safe deployment of new features and A/B testing
+- **Acceptance criteria**:
+  - Runtime feature toggle system
+  - User-based feature rollouts
+  - A/B testing capabilities
+  - Feature flag management interface
+
+**OI3: Configure monitoring and alerting with Prometheus/Grafana**
+- **Priority**: High
+- **Estimated effort**: 5-6 days
+- **Dependencies**: None
+- **Description**: Set up comprehensive monitoring, alerting, and observability for production systems
+- **Acceptance criteria**:
+  - Application metrics collection
+  - Business metrics dashboards
+  - Alerting for critical issues
+  - Log aggregation and analysis
+
+### 🎯 Implementation Strategy
+
+#### Phase 1: Foundation (Weeks 1-4)
+- **Focus**: Security, Testing, and Core Infrastructure
+- **Tasks**: T1, T2, S1, S2, D1, P1, P2
+- **Goal**: Establish robust foundation with comprehensive testing and security
+
+#### Phase 2: Core Kitchen Features (Weeks 5-10)
+- **Focus**: Essential kitchen management functionality
+- **Tasks**: CF1, CF2, CF3, CF4, TE1
+- **Goal**: Deliver core restaurant operations capabilities
+
+#### Phase 3: Advanced Features (Weeks 11-14)
+- **Focus**: Advanced functionality and user experience
+- **Tasks**: CF5, TE2, TE3, T3
+- **Goal**: Complete feature set with mobile and real-time capabilities
+
+#### Phase 4: Production Ready (Weeks 15-16)
+- **Focus**: Operations, monitoring, and documentation
+- **Tasks**: OI1, OI2, OI3, D2, D3, TE4, P3, S3
+- **Goal**: Production-ready system with full observability
+
+### 📊 Success Metrics
+
+- **Performance**: <200ms API response times, 99.9% uptime
+- **Scalability**: Support for 1000+ concurrent orders
+- **Security**: Zero critical vulnerabilities, complete audit trails
+- **User Experience**: <3 second page load times, intuitive workflows
+- **Business Impact**: 30% reduction in order processing time, 25% improvement in inventory accuracy
 
 ---
 

@@ -1,0 +1,240 @@
+# Kitchen Management System - Development Makefile
+
+.PHONY: help build test run clean dev install-deps setup kitchen-setup tasks
+
+# Default target
+help: ## Show this help message
+	@echo "🍽️  Kitchen Management System - Development Commands"
+	@echo "=================================================="
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+# Setup and Installation
+setup: ## Initial project setup (run this first!)
+	@echo "🔧 Setting up Kitchen Management System development environment..."
+	@make install-deps
+	@make kitchen-setup
+	@echo "✅ Setup complete! Run 'make dev' to start development"
+
+install-deps: ## Install development dependencies
+	@echo "📦 Installing Rust dependencies..."
+	cargo fetch
+	@echo "🐍 Setting up Python environment for scripts..."
+	python3 -m pip install --user requests streamlit pandas
+
+kitchen-setup: ## Initialize kitchen management database and configs
+	@echo "🗄️  Setting up database..."
+	docker-compose up -d postgres redis
+	sleep 5
+	sqlx migrate run
+	@echo "📋 Initializing task tracking..."
+	python3 scripts/task_tracker.py --init || echo "Task tracker already initialized"
+
+# Development Commands
+dev: ## Start development environment (backend + frontend + db)
+	@echo "🚀 Starting Kitchen Management System development environment..."
+	docker-compose up -d postgres redis
+	@echo "Starting Rust backend..."
+	cargo run &
+	@echo "Starting Streamlit frontend..."
+	streamlit run app.py &
+	@echo "✅ Development environment started!"
+	@echo "📝 Backend API: http://localhost:3000"
+	@echo "🖥️  Frontend UI: http://localhost:8501"
+
+run: ## Run the Rust backend server
+	@echo "🦀 Starting Rust backend server..."
+	cargo run
+
+frontend: ## Run the Streamlit frontend
+	@echo "🖥️  Starting Streamlit frontend..."
+	streamlit run app.py
+
+# Build and Test
+build: ## Build the project in release mode
+	@echo "🔨 Building Kitchen Management System..."
+	cargo build --release
+
+test: ## Run all tests
+	@echo "🧪 Running tests..."
+	cargo test --lib
+	cargo test --test integration
+	@echo "✅ All tests passed!"
+
+test-unit: ## Run unit tests only
+	@echo "🔬 Running unit tests..."
+	cargo test --lib
+
+test-integration: ## Run integration tests only
+	@echo "🔗 Running integration tests..."
+	cargo test --test integration
+
+test-watch: ## Run tests in watch mode
+	@echo "👀 Running tests in watch mode..."
+	cargo watch -x test
+
+# Code Quality
+lint: ## Run linting and formatting checks
+	@echo "🧹 Running code quality checks..."
+	cargo fmt --check
+	cargo clippy -- -D warnings
+	@echo "✅ Code quality checks passed!"
+
+format: ## Format code
+	@echo "✨ Formatting code..."
+	cargo fmt
+
+fix: ## Fix linting issues
+	@echo "🔧 Fixing linting issues..."
+	cargo clippy --fix --allow-dirty
+	cargo fmt
+
+# Database Management
+db-up: ## Start database services
+	@echo "🗄️  Starting database services..."
+	docker-compose up -d postgres redis
+
+db-down: ## Stop database services
+	@echo "🛑 Stopping database services..."
+	docker-compose down
+
+db-reset: ## Reset database (WARNING: destroys all data!)
+	@echo "⚠️  Resetting database (this will destroy all data)..."
+	@read -p "Are you sure? [y/N] " -n 1 -r; \
+	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
+		docker-compose down -v; \
+		docker-compose up -d postgres redis; \
+		sleep 5; \
+		sqlx migrate run; \
+		echo "✅ Database reset complete!"; \
+	else \
+		echo "❌ Database reset cancelled."; \
+	fi
+
+migrate: ## Run database migrations
+	@echo "🔄 Running database migrations..."
+	sqlx migrate run
+
+# Task Management
+tasks: ## Show task tracker
+	@echo "📋 Opening task tracker..."
+	python3 scripts/task_tracker.py
+
+task-status: ## Show quick task status
+	@echo "📊 Task Status Summary:"
+	@python3 -c "
+import sys; sys.path.append('scripts')
+from task_tracker import KitchenTaskTracker
+tracker = KitchenTaskTracker()
+tracker.show_status()
+tracker.show_next_tasks(3)
+"
+
+# Deployment
+docker-build: ## Build Docker image
+	@echo "🐳 Building Docker image..."
+	docker build -t kitchen-management:latest .
+
+docker-run: ## Run Docker container
+	@echo "🐳 Running Docker container..."
+	docker run -p 3000:3000 kitchen-management:latest
+
+# Documentation
+docs: ## Generate documentation
+	@echo "📚 Generating documentation..."
+	cargo doc --open --no-deps
+
+api-docs: ## Start API documentation server
+	@echo "📖 Starting API documentation server..."
+	@echo "Visit http://localhost:3000/swagger-ui/ when the server is running"
+	@make run
+
+# Monitoring and Observability
+logs: ## Show application logs
+	@echo "📝 Showing application logs..."
+	docker-compose logs -f
+
+metrics: ## Show system metrics (requires monitoring setup)
+	@echo "📊 System metrics available at:"
+	@echo "Prometheus: http://localhost:9090"
+	@echo "Grafana: http://localhost:3001"
+
+# Kitchen-Specific Commands
+menu-demo: ## Run menu management demo
+	@echo "🍽️  Running menu management demo..."
+	@echo "This will create sample menu data for testing"
+	curl -X POST http://localhost:3000/api/v1/demo/menu-data || echo "Backend not running. Start with 'make dev' first."
+
+order-demo: ## Run order management demo
+	@echo "📝 Running order management demo..."
+	@echo "This will create sample orders for testing"
+	curl -X POST http://localhost:3000/api/v1/demo/order-data || echo "Backend not running. Start with 'make dev' first."
+
+kitchen-display: ## Open kitchen display interface
+	@echo "👨‍🍳 Opening kitchen display interface..."
+	@echo "Kitchen Display will be available at http://localhost:3000/kitchen when implemented"
+	
+# Utility Commands
+clean: ## Clean build artifacts
+	@echo "🧹 Cleaning build artifacts..."
+	cargo clean
+	docker-compose down -v
+	@echo "✅ Clean complete!"
+
+health-check: ## Check system health
+	@echo "❤️  Checking system health..."
+	@echo "Database:"
+	@curl -s http://localhost:3000/health/ready | grep -q "ok" && echo "✅ Database OK" || echo "❌ Database not ready"
+	@echo "Redis:"
+	@docker-compose exec redis redis-cli ping | grep -q "PONG" && echo "✅ Redis OK" || echo "❌ Redis not ready"
+	@echo "API:"
+	@curl -s http://localhost:3000/health/live | grep -q "ok" && echo "✅ API OK" || echo "❌ API not ready"
+
+reset-all: ## Complete reset (code, database, dependencies)
+	@echo "🔄 Complete system reset..."
+	@make clean
+	@make setup
+	@echo "✅ Complete reset finished!"
+
+# Development Workflow Examples
+workflow-new-feature: ## Example workflow for starting a new feature
+	@echo "🆕 Starting new feature development workflow..."
+	@echo "1. Creating feature branch..."
+	@echo "2. Setting up development environment..."
+	@make dev
+	@echo "3. Opening task tracker..."
+	@make tasks
+
+workflow-testing: ## Example workflow for testing
+	@echo "🧪 Running complete testing workflow..."
+	@make lint
+	@make test
+	@make health-check
+	@echo "✅ All testing complete!"
+
+# Information Commands
+info: ## Show project information
+	@echo "🍽️  Kitchen Management System"
+	@echo "================================"
+	@echo "📋 24 enhancement tasks planned"
+	@echo "🦀 Built with Rust + Axum"
+	@echo "🐘 PostgreSQL + Redis"
+	@echo "🖥️  Streamlit frontend"
+	@echo "🐳 Docker-ready"
+	@echo "📊 Full observability stack"
+	@echo ""
+	@echo "📝 Quick start: make setup && make dev"
+	@echo "📋 Task tracking: make tasks"
+	@echo "📚 Documentation: make docs"
+
+quick-start: ## Complete quick start guide
+	@echo "🚀 Kitchen Management System - Quick Start"
+	@echo "=========================================="
+	@echo "1️⃣  Initial setup..."
+	@make setup
+	@echo "2️⃣  Starting development environment..."
+	@make dev
+	@echo "3️⃣  Running health checks..."
+	@sleep 10
+	@make health-check
+	@echo "4️⃣  Opening task tracker..."
+	@make tasks

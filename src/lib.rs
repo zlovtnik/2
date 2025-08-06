@@ -1,4 +1,4 @@
-use axum::{Router, routing::{get, post, put, delete}, http::Method};
+use axum::{Router, routing::{get, post, put, delete}, http::Method, middleware::from_fn};
 use sqlx::PgPool;
 use tower_http::{trace::TraceLayer, cors::{CorsLayer, Any}};
 use utoipa_swagger_ui::SwaggerUi;
@@ -14,36 +14,67 @@ pub mod infrastructure;
 pub mod middleware;
 pub mod grpc;
 
+use crate::middleware::rate_limit_configs::RateLimitConfigs;
+
 pub fn app(pool: PgPool) -> Router {
     // Create OpenAPI documentation
     let openapi = docs::ApiDoc::openapi();
     
-    // Build our application with all routes
-    let app = Router::new()
-        // Health check endpoints
+    // Create rate limiters
+    let auth_rate_limiter = RateLimitConfigs::auth_endpoints();
+    let api_rate_limiter = RateLimitConfigs::api_endpoints();
+    let public_rate_limiter = RateLimitConfigs::public_endpoints();
+    let registration_rate_limiter = RateLimitConfigs::registration();
+    
+    // Health endpoints with public rate limiting
+    let health_router = Router::new()
         .route("/health/live", get(api::health::live))
         .route("/health/ready", get(api::health::ready))
-        
-        // Authentication endpoints
+        .layer(from_fn(move |req, next| {
+            let limiter = public_rate_limiter.clone();
+            async move { limiter.middleware(req, next).await }
+        }));
+    
+    // Registration endpoint with strict rate limiting
+    let registration_router = Router::new()
         .route("/api/v1/auth/register", post(api::auth::register))
+        .layer(from_fn(move |req, next| {
+            let limiter = registration_rate_limiter.clone();
+            async move { limiter.middleware(req, next).await }
+        }));
+    
+    // Auth endpoints with auth rate limiting
+    let auth_router = Router::new()
         .route("/api/v1/auth/login", post(api::auth::login))
         .route("/api/v1/auth/refresh", post(api::auth::refresh))
-        
-        // User endpoints
+        .layer(from_fn(move |req, next| {
+            let limiter = auth_rate_limiter.clone();
+            async move { limiter.middleware(req, next).await }
+        }));
+    
+    // API endpoints with moderate rate limiting
+    let api_router = Router::new()
         .route("/api/v1/users", post(api::user::create_user))
         .route("/api/v1/users/me", get(api::user::get_current_user))
         .route("/api/v1/users/me/stats", get(api::user::get_current_user_stats))
         .route("/api/v1/users/:id", get(api::user::get_user))
         .route("/api/v1/users/:id", put(api::user::update_user))
         .route("/api/v1/users/:id", delete(api::user::delete_user))
-        
-        // Refresh token endpoints
         .route("/api/v1/refresh_tokens", post(api::refresh_token::create_refresh_token))
         .route("/api/v1/refresh_tokens/:id", get(api::refresh_token::get_refresh_token))
         .route("/api/v1/refresh_tokens/:id", put(api::refresh_token::update_refresh_token))
         .route("/api/v1/refresh_tokens/:id", delete(api::refresh_token::delete_refresh_token))
-        
-        // Add state
+        .layer(from_fn(move |req, next| {
+            let limiter = api_rate_limiter.clone();
+            async move { limiter.middleware(req, next).await }
+        }));
+    
+    // Combine all routers
+    let app = Router::new()
+        .merge(health_router)
+        .merge(registration_router)
+        .merge(auth_router)
+        .merge(api_router)
         .with_state(pool);
     
     // Configure CORS

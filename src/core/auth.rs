@@ -145,29 +145,195 @@ mod tests {
     use std::env;
     use uuid::Uuid;
 
-    #[test]
-    fn test_hash_and_verify_password() {
-        let password = "test_password";
-        let hash = hash_password(password).expect("Hashing should succeed");
-        assert!(verify_password(password, &hash));
-        assert!(!verify_password("wrong_password", &hash));
+    /// Setup test environment with proper JWT secret
+    fn setup_test_env() {
+        env::set_var("APP_AUTH__JWT_SECRET", "testsecretkeytestsecretkeytestsecr");
     }
 
     #[test]
-    fn test_create_and_verify_jwt() {
-        // Set a fixed secret for deterministic tests
-        env::set_var("APP_AUTH__JWT_SECRET", "testsecretkeytestsecretkeytestsecr");
+    fn test_hash_password_success() {
+        let password = "test_password_123";
+        let hash = hash_password(password).expect("Hashing should succeed");
+        
+        // Hash should not be empty and should be different from original password
+        assert!(!hash.is_empty());
+        assert_ne!(hash, password);
+        
+        // Hash should start with Argon2 identifier
+        assert!(hash.starts_with("$argon2"));
+    }
+
+    #[test]
+    fn test_hash_password_different_salts() {
+        let password = "same_password";
+        let hash1 = hash_password(password).expect("First hash should succeed");
+        let hash2 = hash_password(password).expect("Second hash should succeed");
+        
+        // Same password should produce different hashes due to different salts
+        assert_ne!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_verify_password_correct() {
+        let password = "test_password_123";
+        let hash = hash_password(password).expect("Hashing should succeed");
+        
+        assert!(verify_password(password, &hash));
+    }
+
+    #[test]
+    fn test_verify_password_incorrect() {
+        let password = "correct_password";
+        let wrong_password = "wrong_password";
+        let hash = hash_password(password).expect("Hashing should succeed");
+        
+        assert!(!verify_password(wrong_password, &hash));
+    }
+
+    #[test]
+    fn test_verify_password_empty_inputs() {
+        let hash = hash_password("test").expect("Hashing should succeed");
+        
+        // Empty password should not verify
+        assert!(!verify_password("", &hash));
+        
+        // Valid password against empty hash should not verify
+        assert!(!verify_password("test", ""));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_create_jwt_success() {
+        setup_test_env();
         let user_id = Uuid::new_v4();
+        
+        let token = create_jwt(user_id).expect("JWT creation should succeed");
+        
+        // Token should not be empty and should have JWT structure (header.payload.signature)
+        assert!(!token.is_empty());
+        assert_eq!(token.matches('.').count(), 2);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_create_jwt_different_users() {
+        setup_test_env();
+        let user_id1 = Uuid::new_v4();
+        let user_id2 = Uuid::new_v4();
+        
+        let token1 = create_jwt(user_id1).expect("First JWT creation should succeed");
+        let token2 = create_jwt(user_id2).expect("Second JWT creation should succeed");
+        
+        // Different users should produce different tokens
+        assert_ne!(token1, token2);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_verify_jwt_success() {
+        setup_test_env();
+        let user_id = Uuid::new_v4();
+        
         let token = create_jwt(user_id).expect("JWT creation should succeed");
         let parsed_id = verify_jwt(&token).expect("JWT verification should succeed");
+        
         assert_eq!(user_id, parsed_id);
     }
 
     #[test]
     fn test_verify_jwt_invalid_token() {
-        env::set_var("APP_AUTH__JWT_SECRET", "testsecretkeytestsecretkeytestsecr");
-        let invalid_token = "invalid.token.value";
-        let result = verify_jwt(invalid_token);
-        assert!(result.is_err());
+        setup_test_env();
+        
+        let invalid_tokens = vec![
+            "invalid.token.value",
+            "not_a_jwt_at_all",
+            "",
+            "invalid",
+            "invalid.token",
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.invalid.signature",
+        ];
+        
+        for invalid_token in invalid_tokens {
+            let result = verify_jwt(invalid_token);
+            assert!(result.is_err(), "Token '{}' should be invalid", invalid_token);
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_verify_jwt_wrong_secret() {
+        setup_test_env();
+        let user_id = Uuid::new_v4();
+        let token = create_jwt(user_id).expect("JWT creation should succeed");
+        
+        // Change the secret
+        env::set_var("APP_AUTH__JWT_SECRET", "different_secret_key_for_testing");
+        
+        let result = verify_jwt(&token);
+        assert!(result.is_err(), "JWT verification should fail with wrong secret");
+        
+        // Restore original secret for other tests
+        setup_test_env();
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_use_verify_jwt_for_warning() {
+        setup_test_env();
+        let user_id = Uuid::new_v4();
+        let valid_token = create_jwt(user_id).expect("JWT creation should succeed");
+        
+        assert!(use_verify_jwt_for_warning(&valid_token));
+        assert!(!use_verify_jwt_for_warning("invalid_token"));
+    }
+
+    // Test struct validation
+    #[test]
+    fn test_register_request_validation() {
+        let request = RegisterRequest {
+            email: "test@example.com".to_string(),
+            password: "password123".to_string(),
+            full_name: "Test User".to_string(),
+        };
+        
+        assert_eq!(request.email, "test@example.com");
+        assert_eq!(request.password, "password123");
+        assert_eq!(request.full_name, "Test User");
+    }
+
+    #[test]
+    fn test_login_request_validation() {
+        let request = LoginRequest {
+            email: "user@example.com".to_string(),
+            password: "userpass".to_string(),
+        };
+        
+        assert_eq!(request.email, "user@example.com");
+        assert_eq!(request.password, "userpass");
+    }
+
+    #[test]
+    fn test_user_profile_creation() {
+        let user_id = Uuid::new_v4();
+        let preferences = UserPreferences {
+            theme: Some("dark".to_string()),
+            notifications: Some(true),
+        };
+        
+        let profile = UserProfile {
+            id: user_id,
+            email: "profile@example.com".to_string(),
+            full_name: "Profile User".to_string(),
+            preferences: Some(preferences),
+        };
+        
+        assert_eq!(profile.id, user_id);
+        assert_eq!(profile.email, "profile@example.com");
+        assert_eq!(profile.full_name, "Profile User");
+        assert!(profile.preferences.is_some());
+        
+        let prefs = profile.preferences.unwrap();
+        assert_eq!(prefs.theme, Some("dark".to_string()));
+        assert_eq!(prefs.notifications, Some(true));
     }
 } 
