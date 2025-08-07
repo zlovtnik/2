@@ -6,18 +6,59 @@ use std::env;
 use rand_core::OsRng;
 use utoipa::ToSchema;
 use tracing::{info, warn, error, debug};
+use validator::{Validate, ValidationError};
+use crate::middleware::validation::{ValidatedRequest, InputSanitizer};
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
 pub struct RegisterRequest {
+    #[validate(email(message = "Invalid email format"))]
     pub email: String,
+    #[validate(length(min = 8, max = 128, message = "Password must be between 8 and 128 characters"))]
+    #[validate(custom(function = "validate_password_strength", message = "Password does not meet security requirements"))]
     pub password: String,
+    #[validate(length(min = 1, max = 100, message = "Full name must be between 1 and 100 characters"))]
     pub full_name: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+impl ValidatedRequest for RegisterRequest {}
+
+impl RegisterRequest {
+    /// Sanitize the request data
+    pub fn sanitize(&mut self) {
+        self.email = InputSanitizer::sanitize_email(&self.email);
+        self.full_name = InputSanitizer::sanitize_text(&self.full_name);
+        // Note: We don't sanitize password as it should remain as-is for security
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
 pub struct LoginRequest {
+    #[validate(email(message = "Invalid email format"))]
     pub email: String,
+    #[validate(length(min = 1, message = "Password is required"))]
     pub password: String,
+}
+
+impl ValidatedRequest for LoginRequest {}
+
+impl LoginRequest {
+    /// Sanitize the request data
+    pub fn sanitize(&mut self) {
+        self.email = InputSanitizer::sanitize_email(&self.email);
+        // Note: We don't sanitize password as it should remain as-is for security
+    }
+}
+
+/// Custom validator for password strength
+fn validate_password_strength(password: &str) -> Result<(), ValidationError> {
+    match InputSanitizer::validate_password_strength(password) {
+        Ok(()) => Ok(()),
+        Err(errors) => {
+            let mut error = ValidationError::new("password_strength");
+            error.message = Some(errors.join(", ").into());
+            Err(error)
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
