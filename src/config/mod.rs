@@ -12,7 +12,7 @@ pub fn load() -> Config {
     let server_port = std::env::var("PORT")
         .ok()
         .and_then(|p| p.parse::<u16>().ok())
-        .unwrap_or(3000);
+        .unwrap_or(8080);
     
     let config = Config { server_port };
     
