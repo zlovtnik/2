@@ -15,6 +15,7 @@ pub mod middleware;
 pub mod grpc;
 
 use crate::middleware::rate_limit_configs::RateLimitConfigs;
+use crate::middleware::validation::validate_json_middleware;
 
 pub fn app(pool: PgPool) -> Router {
     // Create OpenAPI documentation
@@ -35,24 +36,26 @@ pub fn app(pool: PgPool) -> Router {
             async move { limiter.middleware(req, next).await }
         }));
     
-    // Registration endpoint with strict rate limiting
+    // Registration endpoint with strict rate limiting and validation
     let registration_router = Router::new()
         .route("/api/v1/auth/register", post(api::auth::register))
+        .layer(from_fn(validate_json_middleware))
         .layer(from_fn(move |req, next| {
             let limiter = registration_rate_limiter.clone();
             async move { limiter.middleware(req, next).await }
         }));
     
-    // Auth endpoints with auth rate limiting
+    // Auth endpoints with auth rate limiting and validation
     let auth_router = Router::new()
         .route("/api/v1/auth/login", post(api::auth::login))
         .route("/api/v1/auth/refresh", post(api::auth::refresh))
+        .layer(from_fn(validate_json_middleware))
         .layer(from_fn(move |req, next| {
             let limiter = auth_rate_limiter.clone();
             async move { limiter.middleware(req, next).await }
         }));
     
-    // API endpoints with moderate rate limiting
+    // API endpoints with moderate rate limiting and validation
     let api_router = Router::new()
         .route("/api/v1/users", post(api::user::create_user))
         .route("/api/v1/users/me", get(api::user::get_current_user))
@@ -64,6 +67,7 @@ pub fn app(pool: PgPool) -> Router {
         .route("/api/v1/refresh_tokens/:id", get(api::refresh_token::get_refresh_token))
         .route("/api/v1/refresh_tokens/:id", put(api::refresh_token::update_refresh_token))
         .route("/api/v1/refresh_tokens/:id", delete(api::refresh_token::delete_refresh_token))
+        .layer(from_fn(validate_json_middleware))
         .layer(from_fn(move |req, next| {
             let limiter = api_rate_limiter.clone();
             async move { limiter.middleware(req, next).await }
