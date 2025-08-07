@@ -1,5 +1,6 @@
 use axum::{Json, response::IntoResponse};
 use crate::core::auth::{RegisterRequest, LoginRequest, hash_password, verify_password, create_jwt, use_verify_jwt_for_warning};
+use crate::middleware::validation::ValidationErrorResponse;
 use tracing::{info, warn};
 use uuid::Uuid;
 use crate::core::user::User;
@@ -8,6 +9,7 @@ use axum::extract::State;
 use chrono::Utc;
 use utoipa::ToSchema;
 use serde::Serialize;
+use validator::Validate;
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ErrorResponse {
@@ -37,6 +39,22 @@ impl IntoResponse for ErrorResponse {
     }
 }
 
+/// Combined error type for auth endpoints
+#[derive(Debug)]
+pub enum AuthError {
+    Validation(ValidationErrorResponse),
+    Standard(ErrorResponse),
+}
+
+impl IntoResponse for AuthError {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            AuthError::Validation(err) => err.into_response(),
+            AuthError::Standard(err) => err.into_response(),
+        }
+    }
+}
+
 #[derive(serde::Serialize, ToSchema)]
 pub struct TokenResponse {
     token: String,
@@ -48,16 +66,29 @@ pub struct TokenResponse {
     request_body = RegisterRequest,
     responses(
         (status = 200, description = "User registered", body = TokenResponse),
+        (status = 400, description = "Validation failed", body = ValidationErrorResponse),
         (status = 500, description = "Registration failed")
     )
 )]
-pub async fn register(State(pool): State<PgPool>, Json(payload): Json<RegisterRequest>) -> Result<Json<TokenResponse>, ErrorResponse> {
+pub async fn register(State(pool): State<PgPool>, Json(mut payload): Json<RegisterRequest>) -> Result<Json<TokenResponse>, AuthError> {
     info!(email = %payload.email, "Registration attempt");
+    
+    // Validate the request
+    if let Err(validation_errors) = payload.validate() {
+        warn!(email = %payload.email, "Registration validation failed");
+        let error_response = ValidationErrorResponse::new(validation_errors);
+        return Err(AuthError::Validation(error_response));
+    }
+    
+    // Sanitize the input
+    payload.sanitize();
+    
     // Hash password
     let password_hash = hash_password(&payload.password).map_err(|e| {
         warn!(error = %e, "Password hashing failed");
-        ErrorResponse::new("Registration failed", Some(format!("Failed to hash password: {}", e)))
+        AuthError::Standard(ErrorResponse::new("Registration failed", Some(format!("Failed to hash password: {}", e))))
     })?;
+    
     let user = User {
         id: Uuid::new_v4(),
         email: payload.email.clone(),
@@ -67,6 +98,7 @@ pub async fn register(State(pool): State<PgPool>, Json(payload): Json<RegisterRe
         created_at: Utc::now(),
         updated_at: Utc::now(),
     };
+    
     let query = "INSERT INTO users (id, email, password_hash, full_name, preferences, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *";
     let inserted = sqlx::query_as::<_, User>(query)
         .bind(user.id)
@@ -85,13 +117,15 @@ pub async fn register(State(pool): State<PgPool>, Json(payload): Json<RegisterRe
             } else {
                 "Failed to create user"
             };
-            ErrorResponse::new("Registration failed", Some(error_msg.to_string()))
+            AuthError::Standard(ErrorResponse::new("Registration failed", Some(error_msg.to_string())))
         })?;
+        
     // Create JWT
     let token = create_jwt(inserted.id).map_err(|e| {
         warn!(error = %e, "JWT creation failed");
-        ErrorResponse::new("Registration failed", Some("Failed to generate authentication token".to_string()))
+        AuthError::Standard(ErrorResponse::new("Registration failed", Some("Failed to generate authentication token".to_string())))
     })?;
+    
     info!(user_id = %inserted.id, "User registered successfully");
     Ok(Json(TokenResponse { token }))
 }
@@ -102,11 +136,22 @@ pub async fn register(State(pool): State<PgPool>, Json(payload): Json<RegisterRe
     request_body = LoginRequest,
     responses(
         (status = 200, description = "User logged in", body = TokenResponse),
+        (status = 400, description = "Validation failed", body = ValidationErrorResponse),
         (status = 401, description = "Invalid credentials")
     )
 )]
-pub async fn login(State(pool): State<PgPool>, Json(payload): Json<LoginRequest>) -> Result<Json<TokenResponse>, ErrorResponse> {
+pub async fn login(State(pool): State<PgPool>, Json(mut payload): Json<LoginRequest>) -> Result<Json<TokenResponse>, AuthError> {
     info!(email = %payload.email, "Login attempt");
+    
+    // Validate the request
+    if let Err(validation_errors) = payload.validate() {
+        warn!(email = %payload.email, "Login validation failed");
+        let error_response = ValidationErrorResponse::new(validation_errors);
+        return Err(AuthError::Validation(error_response));
+    }
+    
+    // Sanitize the input
+    payload.sanitize();
     
     // Fetch user from database
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
@@ -115,24 +160,25 @@ pub async fn login(State(pool): State<PgPool>, Json(payload): Json<LoginRequest>
         .await
         .map_err(|e| {
             warn!(error = %e, "Database error during login");
-            ErrorResponse::new("Login failed", Some("An error occurred while processing your request".to_string()))
+            AuthError::Standard(ErrorResponse::new("Login failed", Some("An error occurred while processing your request".to_string())))
         })?
         .ok_or_else(|| {
             warn!(email = %payload.email, "User not found");
-            ErrorResponse::new("Invalid credentials", Some("Invalid email or password".to_string()))
+            AuthError::Standard(ErrorResponse::new("Invalid credentials", Some("Invalid email or password".to_string())))
         })?;
 
     // Verify password
     if !verify_password(&payload.password, &user.password_hash) {
         warn!(email = %payload.email, "Invalid password");
-        return Err(ErrorResponse::new("Invalid credentials", Some("Invalid email or password".to_string())));
+        return Err(AuthError::Standard(ErrorResponse::new("Invalid credentials", Some("Invalid email or password".to_string()))));
     }
 
     // Create JWT
     let token = create_jwt(user.id).map_err(|e| {
         warn!(error = %e, "JWT creation failed");
-        ErrorResponse::new("Login failed", Some("Failed to generate authentication token".to_string()))
+        AuthError::Standard(ErrorResponse::new("Login failed", Some("Failed to generate authentication token".to_string())))
     })?;
+    
     info!(user_id = %user.id, "User logged in successfully");
     Ok(Json(TokenResponse { token }))
 }
