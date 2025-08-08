@@ -424,6 +424,19 @@ pub async fn get_user(State(pool): State<PgPool>, Path(id): Path<Uuid>, Authenti
     }
 }
 
+#[utoipa::path(
+    delete,
+    path = "/api/v1/users/{id}",
+    params(
+        ("id" = Uuid, Path, description = "User ID to delete")
+    ),
+    responses(
+        (status = 204, description = "User deleted successfully"),
+        (status = 404, description = "User not found"),
+        (status = 500, description = "Database error")
+    ),
+    tag = "users"
+)]
 pub async fn delete_user(State(pool): State<PgPool>, Path(id): Path<Uuid>) -> impl IntoResponse {
     info!(user_id = %id, "Deleting user");
     debug!("Creating user CRUD instance for deletion");
