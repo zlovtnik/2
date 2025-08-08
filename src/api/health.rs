@@ -154,6 +154,14 @@ pub struct HealthStatus {
 /// # Ok(())
 /// # }
 /// ```
+#[utoipa::path(
+    get,
+    path = "/health/live",
+    responses(
+        (status = 200, description = "Application is alive")
+    ),
+    tag = "health"
+)]
 pub async fn live() -> impl IntoResponse {
     (axum::http::StatusCode::OK, "live")
 }
@@ -246,6 +254,15 @@ pub async fn live() -> impl IntoResponse {
 ///   "error": "connection refused"
 /// }
 /// ```
+#[utoipa::path(
+    get,
+    path = "/health/ready",
+    responses(
+        (status = 200, description = "Application is ready", body = HealthStatus),
+        (status = 500, description = "Application is not ready", body = HealthStatus)
+    ),
+    tag = "health"
+)]
 pub async fn ready(State(pool): State<PgPool>) -> impl IntoResponse {
     let (db_status, db_error) = match sqlx::query_scalar::<_, i32>("SELECT 1").fetch_one(&pool).await {
         Ok(_) => ("ok", None),

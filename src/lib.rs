@@ -1,7 +1,7 @@
 use axum::{Router, routing::{get, post, put, delete}, http::Method, middleware::from_fn};
 use sqlx::PgPool;
 use tower_http::{trace::TraceLayer, cors::{CorsLayer, Any}};
-use utoipa_swagger_ui::SwaggerUi;
+// use utoipa_swagger_ui::SwaggerUi; // TODO: Re-enable when Swagger UI integration is fixed
 use utoipa::OpenApi;
 use tonic::transport::Server;
 use std::net::SocketAddr;
@@ -19,7 +19,7 @@ use crate::middleware::validation::validate_json_middleware;
 
 pub fn app(pool: PgPool) -> Router {
     // Create OpenAPI documentation
-    let openapi = docs::ApiDoc::openapi();
+    let _openapi = docs::ApiDoc::openapi();
     
     // Create rate limiters
     let auth_rate_limiter = RateLimitConfigs::auth_endpoints();
@@ -87,11 +87,9 @@ pub fn app(pool: PgPool) -> Router {
         .allow_origin(Any)
         .allow_headers(Any);
 
-    // Create the final router with middleware and Swagger UI
-    let _swagger_ui = SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", openapi);
-    
-    let app = Router::new()
-        .merge(app)
+    // Create the final router with middleware
+    // TODO: Add Swagger UI integration - the OpenAPI spec is generated and available
+    let app = app
         .layer(TraceLayer::new_for_http())
         .layer(cors);
     app

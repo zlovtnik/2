@@ -1,0 +1,66 @@
+[package]
+name = "kitchen-api-examples"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+
+# JSON handling
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+
+# Time and date handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUID support
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+# Error handling
+anyhow = "1.0"
+
+# Base64 encoding (for JWT parsing)
+base64 = "0.22"
+
+# Environment variables
+std = { version = "1.0", optional = true }
+
+[[example]]
+name = "basic_auth"
+path = "authentication/basic_auth.rs"
+
+[[example]]
+name = "jwt_refresh"
+path = "authentication/jwt_refresh.rs"
+
+[[example]]
+name = "role_based_access"
+path = "authentication/role_based_access.rs"
+
+[[example]]
+name = "user_crud"
+path = "user_management/user_crud.rs"
+
+[[example]]
+name = "user_stats"
+path = "user_management/user_stats.rs"
+
+[[example]]
+name = "profile_management"
+path = "user_management/profile_management.rs"
+
+[[example]]
+name = "full_workflow"
+path = "integration/full_workflow.rs"
+
+[[example]]
+name = "error_handling"
+path = "integration/error_handling.rs"
+
+[[example]]
+name = "rate_limiting"
+path = "integration/rate_limiting.rs"

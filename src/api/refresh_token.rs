@@ -10,6 +10,17 @@ fn refresh_token_crud_box(pool: PgPool) -> Box<dyn Crud<RefreshToken, Uuid> + Se
     Box::new(PgCrud::new(pool, "refresh_tokens"))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/refresh_tokens",
+    request_body = RefreshToken,
+    responses(
+        (status = 201, description = "Refresh token created successfully", body = RefreshToken),
+        (status = 409, description = "Refresh token with ID already exists"),
+        (status = 500, description = "Database error")
+    ),
+    tag = "tokens"
+)]
 pub async fn create_refresh_token(State(pool): State<PgPool>, Json(token): Json<RefreshToken>) -> impl IntoResponse {
     info!(token_id = %token.id, user_id = %token.user_id, "Creating new refresh token");
     debug!(token_id = %token.id, expires_at = %token.expires_at, "Refresh token creation details");
@@ -43,6 +54,19 @@ pub async fn create_refresh_token(State(pool): State<PgPool>, Json(token): Json<
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/refresh_tokens/{id}",
+    params(
+        ("id" = Uuid, Path, description = "Refresh token ID to retrieve")
+    ),
+    responses(
+        (status = 200, description = "Refresh token found", body = RefreshToken),
+        (status = 404, description = "Refresh token not found"),
+        (status = 500, description = "Database error")
+    ),
+    tag = "tokens"
+)]
 pub async fn get_refresh_token(State(pool): State<PgPool>, Path(id): Path<Uuid>) -> impl IntoResponse {
     info!(token_id = %id, "Getting refresh token");
     debug!("Creating refresh token CRUD instance");
@@ -67,6 +91,19 @@ pub async fn get_refresh_token(State(pool): State<PgPool>, Path(id): Path<Uuid>)
     }
 }
 
+#[utoipa::path(
+    delete,
+    path = "/api/v1/refresh_tokens/{id}",
+    params(
+        ("id" = Uuid, Path, description = "Refresh token ID to delete")
+    ),
+    responses(
+        (status = 204, description = "Refresh token deleted successfully"),
+        (status = 404, description = "Refresh token not found"),
+        (status = 500, description = "Database error")
+    ),
+    tag = "tokens"
+)]
 pub async fn delete_refresh_token(State(pool): State<PgPool>, Path(id): Path<Uuid>) -> impl IntoResponse {
     info!(token_id = %id, "Deleting refresh token");
     debug!("Creating refresh token CRUD instance for deletion");
@@ -91,6 +128,20 @@ pub async fn delete_refresh_token(State(pool): State<PgPool>, Path(id): Path<Uui
 }
 
 // For demonstration, a simple update handler that updates the token string
+#[utoipa::path(
+    put,
+    path = "/api/v1/refresh_tokens/{id}",
+    params(
+        ("id" = Uuid, Path, description = "Refresh token ID to update")
+    ),
+    request_body = String,
+    responses(
+        (status = 200, description = "Refresh token updated successfully", body = RefreshToken),
+        (status = 404, description = "Refresh token not found"),
+        (status = 500, description = "Database error")
+    ),
+    tag = "tokens"
+)]
 pub async fn update_refresh_token(State(pool): State<PgPool>, Path(id): Path<Uuid>, Json(new_token): Json<String>) -> impl IntoResponse {
     info!(token_id = %id, "Updating refresh token");
     debug!("Creating refresh token CRUD instance for update");

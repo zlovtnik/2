@@ -11,8 +11,6 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-#[cfg(test)]
-use tokio::time::sleep;
 use tracing::{debug, info, warn};
 use serde::Serialize;
 
@@ -205,8 +203,7 @@ pub struct RateLimitResult {
 #[derive(Debug, Clone)]
 pub enum RateLimiter {
     InMemory(Arc<InMemoryRateLimiter>),
-    #[cfg(feature = "redis")]
-    Redis(Arc<RedisRateLimiter>),
+    // Redis support can be added in the future when the redis feature is implemented
 }
 
 impl RateLimiter {
@@ -219,8 +216,6 @@ impl RateLimiter {
     pub async fn check_rate_limit(&self, key: &str) -> RateLimitResult {
         match self {
             Self::InMemory(limiter) => limiter.check_rate_limit(key).await,
-            #[cfg(feature = "redis")]
-            Self::Redis(limiter) => limiter.check_rate_limit(key).await,
         }
     }
 
@@ -228,8 +223,6 @@ impl RateLimiter {
     pub async fn cleanup_expired(&self) {
         match self {
             Self::InMemory(limiter) => limiter.cleanup_expired().await,
-            #[cfg(feature = "redis")]
-            Self::Redis(limiter) => limiter.cleanup_expired().await,
         }
     }
 }
