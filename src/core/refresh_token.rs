@@ -2,8 +2,9 @@ use serde::{Serialize, Deserialize};
 use sqlx::FromRow;
 use uuid::Uuid;
 use chrono::{DateTime, Utc, Duration};
+use utoipa::ToSchema;
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct RefreshToken {
     pub id: Uuid,
     pub user_id: Uuid,

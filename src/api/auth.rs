@@ -1,3 +1,76 @@
+//! Authentication API endpoints for user registration, login, and token management.
+//!
+//! This module provides secure authentication functionality including:
+//! - User registration with validation and password hashing
+//! - User login with credential verification
+//! - JWT token generation and refresh
+//! - Comprehensive error handling and logging
+//!
+//! # Security Features
+//!
+//! - Argon2 password hashing with salt
+//! - JWT tokens with configurable expiration
+//! - Input validation and sanitization
+//! - Rate limiting support
+//! - Comprehensive audit logging
+//!
+//! # Examples
+//!
+//! ## User Registration
+//!
+//! ```rust
+//! use serde_json::json;
+//! use reqwest::Client;
+//!
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let client = Client::new();
+//! let registration = json!({
+//!     "email": "chef@restaurant.com",
+//!     "password": "SecurePass123!",
+//!     "full_name": "Head Chef"
+//! });
+//!
+//! let response = client
+//!     .post("http://localhost:3000/api/v1/auth/register")
+//!     .json(&registration)
+//!     .send()
+//!     .await?;
+//!
+//! if response.status().is_success() {
+//!     let token_response: serde_json::Value = response.json().await?;
+//!     println!("Registration successful: {}", token_response["token"]);
+//! }
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## User Login
+//!
+//! ```rust
+//! use serde_json::json;
+//! use reqwest::Client;
+//!
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let client = Client::new();
+//! let login = json!({
+//!     "email": "chef@restaurant.com",
+//!     "password": "SecurePass123!"
+//! });
+//!
+//! let response = client
+//!     .post("http://localhost:3000/api/v1/auth/login")
+//!     .json(&login)
+//!     .send()
+//!     .await?;
+//!
+//! if response.status().is_success() {
+//!     let token_response: serde_json::Value = response.json().await?;
+//!     println!("Login successful: {}", token_response["token"]);
+//! }
+//! # Ok(())
+//! # }
+//! ```
+
 use axum::{Json, response::IntoResponse};
 use crate::core::auth::{RegisterRequest, LoginRequest, hash_password, verify_password, create_jwt, use_verify_jwt_for_warning};
 use crate::middleware::validation::ValidationErrorResponse;
@@ -11,6 +84,24 @@ use utoipa::ToSchema;
 use serde::Serialize;
 use validator::Validate;
 
+/// Standard error response structure for authentication endpoints.
+///
+/// This structure provides consistent error reporting across all authentication
+/// operations, including detailed error messages and optional additional context.
+///
+/// # Fields
+///
+/// * `error` - The main error category or type
+/// * `details` - Optional additional information about the error
+///
+/// # Examples
+///
+/// ```rust
+/// use kitchen_api::api::auth::ErrorResponse;
+///
+/// let error = ErrorResponse::new("Invalid credentials", Some("Email not found".to_string()));
+/// assert_eq!(error.error, "Invalid credentials");
+/// ```
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ErrorResponse {
     error: String,
@@ -18,6 +109,31 @@ pub struct ErrorResponse {
 }
 
 impl ErrorResponse {
+    /// Creates a new error response with the specified error message and optional details.
+    ///
+    /// # Arguments
+    ///
+    /// * `error` - The main error message or category
+    /// * `details` - Optional additional context or specific error information
+    ///
+    /// # Returns
+    ///
+    /// A new `ErrorResponse` instance ready for serialization and HTTP response.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use kitchen_api::api::auth::ErrorResponse;
+    ///
+    /// // Simple error without details
+    /// let error = ErrorResponse::new("Authentication failed", None);
+    ///
+    /// // Error with additional context
+    /// let detailed_error = ErrorResponse::new(
+    ///     "Registration failed",
+    ///     Some("Email already exists in the system".to_string())
+    /// );
+    /// ```
     fn new(error: impl Into<String>, details: Option<String>) -> Self {
         Self {
             error: error.into(),
@@ -26,7 +142,23 @@ impl ErrorResponse {
     }
 }
 
-// Convert our error responses into proper HTTP responses
+/// Converts `ErrorResponse` into an HTTP response with appropriate status codes.
+///
+/// This implementation automatically maps error types to HTTP status codes:
+/// - "Registration failed" → 400 Bad Request
+/// - "Invalid credentials" → 401 Unauthorized  
+/// - All others → 500 Internal Server Error
+///
+/// # Examples
+///
+/// ```rust
+/// use axum::response::IntoResponse;
+/// use kitchen_api::api::auth::ErrorResponse;
+///
+/// let error = ErrorResponse::new("Invalid credentials", None);
+/// let response = error.into_response();
+/// // Response will have 401 Unauthorized status
+/// ```
 impl IntoResponse for ErrorResponse {
     fn into_response(self) -> axum::response::Response {
         let status = match self.error.as_str() {
@@ -39,13 +171,49 @@ impl IntoResponse for ErrorResponse {
     }
 }
 
-/// Combined error type for auth endpoints
+/// Combined error type for authentication endpoints that handles both validation and standard errors.
+///
+/// This enum provides a unified error handling approach for authentication operations,
+/// supporting both input validation errors and general authentication failures.
+///
+/// # Variants
+///
+/// * `Validation` - Input validation errors with field-specific messages
+/// * `Standard` - General authentication errors (credentials, server errors, etc.)
+///
+/// # Examples
+///
+/// ```rust
+/// use kitchen_api::api::auth::{AuthError, ErrorResponse};
+/// use kitchen_api::middleware::validation::ValidationErrorResponse;
+/// use validator::ValidationErrors;
+///
+/// // Standard authentication error
+/// let auth_error = AuthError::Standard(
+///     ErrorResponse::new("Invalid credentials", None)
+/// );
+///
+/// // Validation error
+/// let validation_errors = ValidationErrors::new();
+/// let validation_error = AuthError::Validation(
+///     ValidationErrorResponse::new(validation_errors)
+/// );
+/// ```
 #[derive(Debug)]
 pub enum AuthError {
     Validation(ValidationErrorResponse),
     Standard(ErrorResponse),
 }
 
+/// Converts `AuthError` into an HTTP response, delegating to the appropriate error type.
+///
+/// This implementation ensures that both validation errors and standard errors
+/// are properly converted to HTTP responses with correct status codes and formatting.
+///
+/// # Error Response Mapping
+///
+/// - `Validation` errors → 400 Bad Request with field-specific error details
+/// - `Standard` errors → Various status codes based on error type
 impl IntoResponse for AuthError {
     fn into_response(self) -> axum::response::Response {
         match self {
@@ -55,11 +223,122 @@ impl IntoResponse for AuthError {
     }
 }
 
+/// Response structure containing a JWT authentication token.
+///
+/// This structure is returned by successful authentication operations
+/// (registration and login) and contains the JWT token needed for
+/// authenticated API requests.
+///
+/// # Fields
+///
+/// * `token` - The JWT authentication token with 24-hour expiration
+///
+/// # Usage
+///
+/// The token should be included in subsequent API requests using the
+/// `Authorization: Bearer <token>` header format.
+///
+/// # Examples
+///
+/// ```rust
+/// use kitchen_api::api::auth::TokenResponse;
+/// use serde_json;
+///
+/// let response = TokenResponse { token: "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...".to_string() };
+/// let json = serde_json::to_string(&response).unwrap();
+/// ```
 #[derive(serde::Serialize, ToSchema)]
 pub struct TokenResponse {
     token: String,
 }
 
+/// Registers a new user account with email, password, and full name.
+///
+/// This endpoint creates a new user account with secure password hashing,
+/// input validation, and automatic JWT token generation for immediate authentication.
+///
+/// # Arguments
+///
+/// * `pool` - Database connection pool for user storage
+/// * `payload` - Registration request containing email, password, and full name
+///
+/// # Returns
+///
+/// * `Ok(TokenResponse)` - Registration successful with JWT token
+/// * `Err(AuthError::Validation)` - Input validation failed
+/// * `Err(AuthError::Standard)` - Registration failed (duplicate email, server error)
+///
+/// # Security Features
+///
+/// - Password strength validation (8+ chars, mixed case, numbers, symbols)
+/// - Email format validation and normalization
+/// - Argon2 password hashing with random salt
+/// - Input sanitization to prevent XSS
+/// - Comprehensive audit logging
+///
+/// # Kitchen Management Context
+///
+/// This endpoint is typically used during staff onboarding to create accounts
+/// for kitchen staff, managers, and administrators. The generated token can
+/// immediately be used to access kitchen management features.
+///
+/// # Examples
+///
+/// ```rust
+/// use serde_json::json;
+/// use reqwest::Client;
+///
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let client = Client::new();
+/// let registration = json!({
+///     "email": "chef@restaurant.com",
+///     "password": "SecurePass123!",
+///     "full_name": "Head Chef"
+/// });
+///
+/// let response = client
+///     .post("http://localhost:3000/api/v1/auth/register")
+///     .json(&registration)
+///     .send()
+///     .await?;
+///
+/// match response.status() {
+///     reqwest::StatusCode::OK => {
+///         let token_response: serde_json::Value = response.json().await?;
+///         println!("Registration successful: {}", token_response["token"]);
+///     }
+///     reqwest::StatusCode::BAD_REQUEST => {
+///         println!("Validation failed - check email format and password strength");
+///     }
+///     _ => {
+///         println!("Registration failed - email may already exist");
+///     }
+/// }
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Error Responses
+///
+/// ## 400 Bad Request - Validation Error
+/// ```json
+/// {
+///   "error": "VALIDATION_ERROR",
+///   "message": "Request validation failed",
+///   "validation_errors": {
+///     "email": ["Invalid email format"],
+///     "password": ["Password must contain at least one uppercase letter"]
+///   }
+/// }
+/// ```
+///
+/// ## 400 Bad Request - Duplicate Email
+/// ```json
+/// {
+///   "error": "Registration failed",
+///   "details": "Email already exists"
+/// }
+/// ```
 #[utoipa::path(
     post,
     path = "/api/v1/auth/register",
@@ -130,6 +409,99 @@ pub async fn register(State(pool): State<PgPool>, Json(mut payload): Json<Regist
     Ok(Json(TokenResponse { token }))
 }
 
+/// Authenticates a user with email and password, returning a JWT token.
+///
+/// This endpoint validates user credentials against the database and returns
+/// a JWT token for authenticated API access. The token is valid for 24 hours.
+///
+/// # Arguments
+///
+/// * `pool` - Database connection pool for user lookup
+/// * `payload` - Login request containing email and password
+///
+/// # Returns
+///
+/// * `Ok(TokenResponse)` - Authentication successful with JWT token
+/// * `Err(AuthError::Validation)` - Input validation failed
+/// * `Err(AuthError::Standard)` - Invalid credentials or server error
+///
+/// # Security Features
+///
+/// - Secure password verification using Argon2
+/// - Email normalization and validation
+/// - Input sanitization
+/// - Comprehensive audit logging with user ID
+/// - Protection against timing attacks
+///
+/// # Kitchen Management Context
+///
+/// This endpoint is used by kitchen staff to access their daily workflows,
+/// including order management, inventory tracking, and shift coordination.
+/// The returned token provides access to role-based kitchen features.
+///
+/// # Examples
+///
+/// ```rust
+/// use serde_json::json;
+/// use reqwest::Client;
+///
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let client = Client::new();
+/// let login = json!({
+///     "email": "chef@restaurant.com",
+///     "password": "SecurePass123!"
+/// });
+///
+/// let response = client
+///     .post("http://localhost:3000/api/v1/auth/login")
+///     .json(&login)
+///     .send()
+///     .await?;
+///
+/// match response.status() {
+///     reqwest::StatusCode::OK => {
+///         let token_response: serde_json::Value = response.json().await?;
+///         let token = &token_response["token"];
+///         
+///         // Use token for authenticated requests
+///         let profile_response = client
+///             .get("http://localhost:3000/api/v1/user/profile")
+///             .header("Authorization", format!("Bearer {}", token))
+///             .send()
+///             .await?;
+///     }
+///     reqwest::StatusCode::UNAUTHORIZED => {
+///         println!("Invalid email or password");
+///     }
+///     _ => {
+///         println!("Login failed due to server error");
+///     }
+/// }
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Error Responses
+///
+/// ## 400 Bad Request - Validation Error
+/// ```json
+/// {
+///   "error": "VALIDATION_ERROR",
+///   "message": "Request validation failed",
+///   "validation_errors": {
+///     "email": ["Invalid email format"],
+///     "password": ["Password is required"]
+///   }
+/// }
+/// ```
+///
+/// ## 401 Unauthorized - Invalid Credentials
+/// ```json
+/// {
+///   "error": "Invalid credentials",
+///   "details": "Invalid email or password"
+/// }
+/// ```
 #[utoipa::path(
     post,
     path = "/api/v1/auth/login",
@@ -183,6 +555,54 @@ pub async fn login(State(pool): State<PgPool>, Json(mut payload): Json<LoginRequ
     Ok(Json(TokenResponse { token }))
 }
 
+/// Refreshes an existing JWT token to extend the authentication session.
+///
+/// This endpoint allows clients to obtain a new JWT token before the current one expires,
+/// enabling seamless session management without requiring re-authentication.
+///
+/// **Note**: This is currently a placeholder implementation. In production, this endpoint
+/// should validate the existing token and issue a new one with extended expiration.
+///
+/// # Returns
+///
+/// * `200 OK` - Token refresh successful (placeholder response)
+///
+/// # Future Implementation
+///
+/// The complete implementation should:
+/// - Validate the existing JWT token from Authorization header
+/// - Check token expiration and validity
+/// - Generate a new token with extended expiration
+/// - Return the new token in the same format as login/register
+/// - Log the refresh operation for audit purposes
+///
+/// # Kitchen Management Context
+///
+/// Token refresh is essential for kitchen staff who work long shifts and need
+/// continuous access to kitchen management systems without interruption.
+///
+/// # Examples
+///
+/// ```rust
+/// use reqwest::Client;
+///
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let client = Client::new();
+/// let current_token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...";
+///
+/// let response = client
+///     .post("http://localhost:3000/api/v1/auth/refresh")
+///     .header("Authorization", format!("Bearer {}", current_token))
+///     .send()
+///     .await?;
+///
+/// if response.status().is_success() {
+///     // In future implementation, this would return a new TokenResponse
+///     println!("Token refreshed successfully");
+/// }
+/// # Ok(())
+/// # }
+/// ```
 #[utoipa::path(
     post,
     path = "/api/v1/auth/refresh",

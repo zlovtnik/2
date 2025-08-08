@@ -1,3 +1,52 @@
+//! Core authentication functionality including password hashing, JWT operations, and validation.
+//!
+//! This module provides the fundamental authentication building blocks used throughout
+//! the kitchen management system. It handles secure password operations, JWT token
+//! management, and request validation with comprehensive security features.
+//!
+//! # Security Features
+//!
+//! - **Argon2 Password Hashing**: Industry-standard password hashing with salt
+//! - **JWT Token Management**: Secure token generation and validation
+//! - **Input Validation**: Comprehensive validation with custom rules
+//! - **Input Sanitization**: XSS and injection prevention
+//! - **Password Strength Validation**: Enforced complexity requirements
+//!
+//! # Examples
+//!
+//! ## Password Hashing and Verification
+//!
+//! ```rust
+//! use kitchen_api::core::auth::{hash_password, verify_password};
+//!
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let password = "SecurePass123!";
+//! let hash = hash_password(password)?;
+//!
+//! // Later, during login
+//! let is_valid = verify_password(password, &hash);
+//! assert!(is_valid);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## JWT Token Operations
+//!
+//! ```rust
+//! use kitchen_api::core::auth::{create_jwt, verify_jwt};
+//! use uuid::Uuid;
+//!
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let user_id = Uuid::new_v4();
+//! let token = create_jwt(user_id)?;
+//!
+//! // Later, during request validation
+//! let parsed_user_id = verify_jwt(&token)?;
+//! assert_eq!(user_id, parsed_user_id);
+//! # Ok(())
+//! # }
+//! ```
+
 use serde::{Deserialize, Serialize};
 use argon2::Argon2;
 use argon2::password_hash::{SaltString, PasswordHasher, PasswordHash, PasswordVerifier};
@@ -9,6 +58,46 @@ use tracing::{info, warn, error, debug};
 use validator::{Validate, ValidationError};
 use crate::middleware::validation::{ValidatedRequest, InputSanitizer};
 
+/// User registration request structure with comprehensive validation.
+///
+/// This structure represents a user registration request with built-in validation
+/// rules for email format, password strength, and name requirements.
+///
+/// # Validation Rules
+///
+/// - **Email**: Must be valid email format (RFC 5322 compliant)
+/// - **Password**: 8-128 characters with strength requirements (mixed case, numbers, symbols)
+/// - **Full Name**: 1-100 characters, required field
+///
+/// # Security Features
+///
+/// - Input sanitization to prevent XSS attacks
+/// - Password strength validation with custom rules
+/// - Email normalization (lowercase, trimmed)
+///
+/// # Examples
+///
+/// ```rust
+/// use kitchen_api::core::auth::RegisterRequest;
+/// use validator::Validate;
+///
+/// let request = RegisterRequest {
+///     email: "chef@restaurant.com".to_string(),
+///     password: "SecurePass123!".to_string(),
+///     full_name: "Head Chef".to_string(),
+/// };
+///
+/// // Validate the request
+/// match request.validate() {
+///     Ok(()) => println!("Registration request is valid"),
+///     Err(errors) => println!("Validation errors: {:?}", errors),
+/// }
+/// ```
+///
+/// # Kitchen Management Context
+///
+/// Used during staff onboarding to create new kitchen management accounts
+/// with appropriate security validation for restaurant environments.
 #[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
 pub struct RegisterRequest {
     #[validate(email(message = "Invalid email format"))]
@@ -23,7 +112,36 @@ pub struct RegisterRequest {
 impl ValidatedRequest for RegisterRequest {}
 
 impl RegisterRequest {
-    /// Sanitize the request data
+    /// Sanitizes the request data to prevent XSS and normalize input.
+    ///
+    /// This method applies appropriate sanitization to each field:
+    /// - Email: Trimmed and converted to lowercase
+    /// - Full name: HTML entities escaped, trimmed
+    /// - Password: Left unchanged to preserve security
+    ///
+    /// # Security Note
+    ///
+    /// The password field is intentionally not sanitized to preserve
+    /// the exact characters entered by the user, which is critical
+    /// for password security and verification.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use kitchen_api::core::auth::RegisterRequest;
+    ///
+    /// let mut request = RegisterRequest {
+    ///     email: "  Chef@Restaurant.COM  ".to_string(),
+    ///     password: "SecurePass123!".to_string(),
+    ///     full_name: "<script>alert('xss')</script>Chef Name".to_string(),
+    /// };
+    ///
+    /// request.sanitize();
+    ///
+    /// assert_eq!(request.email, "chef@restaurant.com");
+    /// assert_eq!(request.password, "SecurePass123!"); // Unchanged
+    /// assert!(request.full_name.contains("&lt;script&gt;")); // HTML escaped
+    /// ```
     pub fn sanitize(&mut self) {
         self.email = InputSanitizer::sanitize_email(&self.email);
         self.full_name = InputSanitizer::sanitize_text(&self.full_name);
@@ -31,6 +149,44 @@ impl RegisterRequest {
     }
 }
 
+/// User login request structure with email and password validation.
+///
+/// This structure represents a user authentication request with validation
+/// rules for email format and password presence.
+///
+/// # Validation Rules
+///
+/// - **Email**: Must be valid email format
+/// - **Password**: Required field (minimum 1 character)
+///
+/// # Security Features
+///
+/// - Email normalization and validation
+/// - Input sanitization for XSS prevention
+/// - Password field preserved exactly as entered
+///
+/// # Examples
+///
+/// ```rust
+/// use kitchen_api::core::auth::LoginRequest;
+/// use validator::Validate;
+///
+/// let request = LoginRequest {
+///     email: "chef@restaurant.com".to_string(),
+///     password: "SecurePass123!".to_string(),
+/// };
+///
+/// // Validate the request
+/// match request.validate() {
+///     Ok(()) => println!("Login request is valid"),
+///     Err(errors) => println!("Validation errors: {:?}", errors),
+/// }
+/// ```
+///
+/// # Kitchen Management Context
+///
+/// Used by kitchen staff to authenticate and access their daily workflows,
+/// including order management, inventory tracking, and shift coordination.
 #[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
 pub struct LoginRequest {
     #[validate(email(message = "Invalid email format"))]
@@ -81,6 +237,56 @@ struct Claims {
     exp: usize,
 }
 
+/// Hashes a password using Argon2 with a random salt.
+///
+/// This function uses the Argon2id algorithm, which is the recommended
+/// password hashing algorithm for new applications. It automatically
+/// generates a cryptographically secure random salt for each password.
+///
+/// # Arguments
+///
+/// * `password` - The plaintext password to hash
+///
+/// # Returns
+///
+/// * `Ok(String)` - The hashed password in PHC string format
+/// * `Err(anyhow::Error)` - If hashing fails due to system constraints
+///
+/// # Security Features
+///
+/// - Uses Argon2id algorithm (winner of the Password Hashing Competition)
+/// - Cryptographically secure random salt generation
+/// - Default parameters optimized for security vs. performance
+/// - Comprehensive error logging for security monitoring
+///
+/// # Examples
+///
+/// ```rust
+/// use kitchen_api::core::auth::hash_password;
+///
+/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let password = "SecurePass123!";
+/// let hash = hash_password(password)?;
+///
+/// // Hash format: $argon2id$v=19$m=4096,t=3,p=1$salt$hash
+/// assert!(hash.starts_with("$argon2id$"));
+/// assert_ne!(hash, password); // Hash is different from original
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Kitchen Management Context
+///
+/// Used during staff registration to securely store passwords for
+/// kitchen management system access. Each password gets a unique
+/// salt to prevent rainbow table attacks.
+///
+/// # Performance Considerations
+///
+/// Argon2 is intentionally slow to prevent brute force attacks.
+/// Hashing typically takes 10-100ms depending on system performance.
+/// This is acceptable for registration but consider caching for
+/// high-frequency operations.
 pub fn hash_password(password: &str) -> anyhow::Result<String> {
     debug!("Starting password hashing operation");
     let salt = SaltString::generate(&mut OsRng);
@@ -98,6 +304,64 @@ pub fn hash_password(password: &str) -> anyhow::Result<String> {
     Ok(hash)
 }
 
+/// Verifies a password against its Argon2 hash.
+///
+/// This function takes a plaintext password and compares it against
+/// a previously generated Argon2 hash to determine if they match.
+/// It handles hash parsing and verification securely.
+///
+/// # Arguments
+///
+/// * `password` - The plaintext password to verify
+/// * `hash` - The stored Argon2 hash to verify against
+///
+/// # Returns
+///
+/// * `true` - Password matches the hash
+/// * `false` - Password doesn't match or hash is invalid
+///
+/// # Security Features
+///
+/// - Constant-time comparison to prevent timing attacks
+/// - Secure hash parsing with error handling
+/// - Comprehensive audit logging for security monitoring
+/// - Automatic handling of different Argon2 parameter sets
+///
+/// # Examples
+///
+/// ```rust
+/// use kitchen_api::core::auth::{hash_password, verify_password};
+///
+/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let password = "SecurePass123!";
+/// let hash = hash_password(password)?;
+///
+/// // Verify correct password
+/// assert!(verify_password(password, &hash));
+///
+/// // Verify incorrect password
+/// assert!(!verify_password("WrongPassword", &hash));
+///
+/// // Verify against invalid hash
+/// assert!(!verify_password(password, "invalid_hash"));
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Kitchen Management Context
+///
+/// Used during staff login to authenticate kitchen personnel.
+/// Critical for maintaining secure access to kitchen operations,
+/// order management, and sensitive restaurant data.
+///
+/// # Error Handling
+///
+/// This function never panics and returns `false` for any error
+/// condition, including:
+/// - Invalid hash format
+/// - Corrupted hash data
+/// - System memory constraints
+/// - Hash algorithm mismatches
 pub fn verify_password(password: &str, hash: &str) -> bool {
     debug!("Starting password verification");
     let parsed_hash = PasswordHash::new(hash);
@@ -115,6 +379,80 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
     }
 }
 
+/// Creates a JWT token for the specified user with 24-hour expiration.
+///
+/// This function generates a signed JWT token containing the user ID
+/// and expiration time. The token is signed using HMAC-SHA256 with
+/// a secret key from environment variables.
+///
+/// # Arguments
+///
+/// * `user_id` - The UUID of the user for whom to create the token
+///
+/// # Returns
+///
+/// * `Ok(String)` - The signed JWT token
+/// * `Err(anyhow::Error)` - If token creation fails
+///
+/// # Token Structure
+///
+/// The JWT contains:
+/// - **sub** (subject): User UUID as string
+/// - **exp** (expiration): Unix timestamp (24 hours from creation)
+/// - **alg** (algorithm): HS256 (HMAC-SHA256)
+///
+/// # Environment Configuration
+///
+/// Requires `APP_AUTH__JWT_SECRET` environment variable for signing.
+/// Falls back to a default secret with warning if not configured.
+///
+/// # Security Features
+///
+/// - HMAC-SHA256 signing for integrity verification
+/// - Automatic expiration (24 hours)
+/// - Comprehensive audit logging
+/// - Secure secret key handling
+///
+/// # Examples
+///
+/// ```rust
+/// use kitchen_api::core::auth::create_jwt;
+/// use uuid::Uuid;
+/// use std::env;
+///
+/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// // Set JWT secret (in production, use environment variables)
+/// env::set_var("APP_AUTH__JWT_SECRET", "your-secret-key-here");
+///
+/// let user_id = Uuid::new_v4();
+/// let token = create_jwt(user_id)?;
+///
+/// // Token format: header.payload.signature
+/// assert_eq!(token.matches('.').count(), 2);
+/// println!("Created token for user {}: {}", user_id, token);
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Kitchen Management Context
+///
+/// Used after successful authentication to provide kitchen staff
+/// with access tokens for API requests. The 24-hour expiration
+/// balances security with usability for typical shift lengths.
+///
+/// # Token Usage
+///
+/// The returned token should be included in API requests:
+/// ```
+/// Authorization: Bearer <token>
+/// ```
+///
+/// # Security Considerations
+///
+/// - Store JWT secret securely in environment variables
+/// - Use HTTPS to prevent token interception
+/// - Consider shorter expiration for high-security environments
+/// - Implement token refresh for long-running sessions
 pub fn create_jwt(user_id: uuid::Uuid) -> anyhow::Result<String> {
     info!(user_id = %user_id, "Creating JWT token");
     debug!("Loading JWT secret from environment");
