@@ -134,7 +134,7 @@ impl ErrorResponse {
     ///     Some("Email already exists in the system".to_string())
     /// );
     /// ```
-    fn new(error: impl Into<String>, details: Option<String>) -> Self {
+    pub fn new(error: impl Into<String>, details: Option<String>) -> Self {
         Self {
             error: error.into(),
             details,
@@ -346,7 +346,7 @@ pub struct TokenResponse {
     responses(
         (status = 200, description = "Kitchen staff member registered successfully - Rate limit: 10 req/min with 2 burst allowance", body = TokenResponse),
         (status = 400, description = "Registration validation failed", body = ValidationErrorResponse),
-        (status = 500, description = "Registration failed due to server error")
+        (status = 500, description = "Registration failed due to server error", body = ErrorResponse)
     ),
     tag = "Kitchen Staff Authentication"
 )]
@@ -510,7 +510,8 @@ pub async fn register(State(pool): State<PgPool>, Json(mut payload): Json<Regist
     responses(
         (status = 200, description = "Kitchen staff member authenticated successfully - Rate limit: 10 req/min with 2 burst allowance", body = TokenResponse),
         (status = 400, description = "Login validation failed", body = ValidationErrorResponse),
-        (status = 401, description = "Invalid kitchen staff credentials")
+        (status = 401, description = "Invalid kitchen staff credentials", body = ErrorResponse),
+        (status = 500, description = "Login failed due to server error", body = ErrorResponse)
     ),
     tag = "Kitchen Staff Authentication"
 )]

@@ -5,40 +5,22 @@
 
 use std::collections::{HashMap, HashSet};
 use serde_json::Value;
+use thiserror::Error;
 
 /// Documentation validation errors
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum DocumentationError {
+    #[error("Missing documentation for public API: {api}")]
     MissingDocumentation { api: String },
+    #[error("Invalid OpenAPI specification: {reason}")]
     InvalidOpenApiSpec { reason: String },
+    #[error("Example validation failed: {example} - {error}")]
     ExampleValidationFailed { example: String, error: String },
+    #[error("Documentation build failed: {error}")]
     BuildFailed { error: String },
+    #[error("Schema validation failed: {schema} - {error}")]
     SchemaValidationFailed { schema: String, error: String },
 }
-
-impl std::fmt::Display for DocumentationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DocumentationError::MissingDocumentation { api } => {
-                write!(f, "Missing documentation for public API: {}", api)
-            }
-            DocumentationError::InvalidOpenApiSpec { reason } => {
-                write!(f, "Invalid OpenAPI specification: {}", reason)
-            }
-            DocumentationError::ExampleValidationFailed { example, error } => {
-                write!(f, "Example validation failed: {} - {}", example, error)
-            }
-            DocumentationError::BuildFailed { error } => {
-                write!(f, "Documentation build failed: {}", error)
-            }
-            DocumentationError::SchemaValidationFailed { schema, error } => {
-                write!(f, "Schema validation failed: {} - {}", schema, error)
-            }
-        }
-    }
-}
-
-impl std::error::Error for DocumentationError {}
 
 /// Documentation validation results
 #[derive(Debug, Clone)]
@@ -51,7 +33,6 @@ pub struct ValidationResult {
     pub invalid_examples: Vec<String>,
     /// Schema validation errors
     pub schema_errors: Vec<String>,
-    /// Warnings
     pub warnings: Vec<String>,
     /// Coverage statistics
     pub coverage: DocumentationCoverage,
@@ -65,21 +46,6 @@ pub struct DocumentationCoverage {
     /// Number of documented APIs
     pub documented_apis: usize,
     /// Documentation coverage percentage
-    pub coverage_percentage: f64,
-    /// APIs by module
-    pub module_coverage: HashMap<String, ModuleCoverage>,
-}
-
-/// Module-specific documentation coverage
-#[derive(Debug, Clone)]
-pub struct ModuleCoverage {
-    /// Module name
-    pub module_name: String,
-    /// Total APIs in module
-    pub total_apis: usize,
-    /// Documented APIs in module
-    pub documented_apis: usize,
-    /// Coverage percentage for this module
     pub coverage_percentage: f64,
 }
 
@@ -106,7 +72,6 @@ impl OpenApiValidator {
                 total_apis: 0,
                 documented_apis: 0,
                 coverage_percentage: 0.0,
-                module_coverage: HashMap::new(),
             },
         };
         
@@ -150,82 +115,63 @@ impl OpenApiValidator {
     fn validate_paths(&self, result: &mut ValidationResult) -> Result<(), DocumentationError> {
         for (path, path_item) in &self.spec.paths.paths {
             // Check that each path has at least one operation
-            let has_operations = path_item.get.is_some() 
-                || path_item.post.is_some() 
-                || path_item.put.is_some() 
-                || path_item.delete.is_some()
-                || path_item.patch.is_some()
-                || path_item.head.is_some()
-                || path_item.options.is_some()
-                || path_item.trace.is_some();
-                
+            let has_operations = !path_item.operations.is_empty();
+
             if !has_operations {
                 result.schema_errors.push(format!("Path {} must have at least one HTTP operation", path));
                 result.success = false;
             }
-            
+
             // Validate individual operations
             self.validate_operations(path, path_item, result)?;
         }
-        
+
         Ok(())
     }
     
     fn validate_operations(&self, path: &str, path_item: &utoipa::openapi::path::PathItem, result: &mut ValidationResult) -> Result<(), DocumentationError> {
-        let operations = [
-            ("GET", &path_item.get),
-            ("POST", &path_item.post),
-            ("PUT", &path_item.put),
-            ("DELETE", &path_item.delete),
-            ("PATCH", &path_item.patch),
-            ("HEAD", &path_item.head),
-            ("OPTIONS", &path_item.options),
-            ("TRACE", &path_item.trace),
-        ];
-        
-        for (method, operation) in operations {
+        for (method, operation) in &path_item.operations {
             if let Some(op) = operation {
                 // Validate that operation has summary or description
                 if op.summary.is_none() && op.description.is_none() {
                     result.missing_docs.push(format!("{} {} - missing summary or description", method, path));
                     result.success = false;
                 }
-                
+
                 // Validate that operation has responses
                 if op.responses.responses.is_empty() && op.responses.default.is_none() {
                     result.schema_errors.push(format!("{} {} - missing responses", method, path));
                     result.success = false;
                 }
-                
+
                 // Check for error responses on non-health endpoints
                 if !path.contains("/health/") {
                     let has_error_responses = op.responses.responses.keys().any(|status| {
                         status.starts_with('4') || status.starts_with('5')
                     }) || op.responses.default.is_some();
-                    
+
                     if !has_error_responses {
                         result.warnings.push(format!("{} {} - consider adding error responses", method, path));
                     }
                 }
             }
         }
-        
+
         Ok(())
     }
     
     fn validate_schemas(&self, result: &mut ValidationResult) -> Result<(), DocumentationError> {
         if let Some(components) = &self.spec.components {
             if let Some(schemas) = &components.schemas {
-                // Collect all schema references used in the spec
                 let spec_json = serde_json::to_value(&self.spec)
                     .map_err(|e| DocumentationError::SchemaValidationFailed {
                         schema: "spec".to_string(),
                         error: e.to_string(),
                     })?;
-                
+
                 let mut referenced_schemas = HashSet::new();
                 collect_schema_references(&spec_json, &mut referenced_schemas);
-                
+
                 // Check that all referenced schemas are defined
                 for referenced in &referenced_schemas {
                     if !schemas.contains_key(referenced) {
@@ -233,7 +179,7 @@ impl OpenApiValidator {
                         result.success = false;
                     }
                 }
-                
+
                 // Warn about unused schemas
                 for (schema_name, _) in schemas {
                     if !referenced_schemas.contains(schema_name) {
@@ -241,11 +187,6 @@ impl OpenApiValidator {
                     }
                 }
             }
-        }
-        
-        Ok(())
-    }
-    
     fn validate_security_schemes(&self, result: &mut ValidationResult) -> Result<(), DocumentationError> {
         if let Some(components) = &self.spec.components {
             if let Some(security_schemes) = &components.security_schemes {
@@ -268,7 +209,7 @@ impl OpenApiValidator {
                 }
             }
         }
-        
+
         Ok(())
     }
     
@@ -289,12 +230,7 @@ impl OpenApiValidator {
     }
     
     fn path_has_documentation(&self, path_item: &utoipa::openapi::path::PathItem) -> bool {
-        let operations = [
-            &path_item.get, &path_item.post, &path_item.put, &path_item.delete,
-            &path_item.patch, &path_item.head, &path_item.options, &path_item.trace,
-        ];
-        
-        operations.iter().any(|op| {
+        path_item.operations.values().any(|op| {
             if let Some(operation) = op {
                 operation.summary.is_some() || operation.description.is_some()
             } else {
@@ -344,7 +280,6 @@ fn extract_schema_name(ref_str: &str) -> Option<String> {
 /// Example validator for code examples in documentation
 pub struct ExampleValidator {
     base_url: String,
-    client: Option<reqwest::Client>,
 }
 
 impl ExampleValidator {
@@ -352,15 +287,6 @@ impl ExampleValidator {
     pub fn new(base_url: String) -> Self {
         Self {
             base_url,
-            client: None,
-        }
-    }
-    
-    /// Create a new example validator with HTTP client for integration testing
-    pub fn with_client(base_url: String, client: reqwest::Client) -> Self {
-        Self {
-            base_url,
-            client: Some(client),
         }
     }
     
@@ -376,7 +302,6 @@ impl ExampleValidator {
                 total_apis: 0,
                 documented_apis: 0,
                 coverage_percentage: 0.0,
-                module_coverage: HashMap::new(),
             },
         };
         
@@ -405,24 +330,8 @@ impl ExampleValidator {
             result.success = false;
         }
         
-        // If we have a client, test the actual API
-        if let Some(client) = &self.client {
-            match client
-                .post(&format!("{}/api/v1/auth/register", self.base_url))
-                .json(&registration_example)
-                .send()
-                .await
-            {
-                Ok(response) => {
-                    if !response.status().is_success() && response.status() != reqwest::StatusCode::BAD_REQUEST {
-                        result.warnings.push(format!("Registration example returned unexpected status: {}", response.status()));
-                    }
-                }
-                Err(e) => {
-                    result.warnings.push(format!("Registration example request failed: {}", e));
-                }
-            }
-        }
+        // Static validation only - no HTTP requests during build
+        result.warnings.push("HTTP-based example validation disabled during build".to_string());
         
         Ok(())
     }
@@ -440,24 +349,8 @@ impl ExampleValidator {
     }
     
     async fn validate_health_examples(&self, result: &mut ValidationResult) -> Result<(), DocumentationError> {
-        // If we have a client, test health endpoints
-        if let Some(client) = &self.client {
-            match client
-                .get(&format!("{}/health/live", self.base_url))
-                .send()
-                .await
-            {
-                Ok(response) => {
-                    if !response.status().is_success() {
-                        result.invalid_examples.push(format!("Health live example failed: {}", response.status()));
-                        result.success = false;
-                    }
-                }
-                Err(e) => {
-                    result.warnings.push(format!("Health live example request failed: {}", e));
-                }
-            }
-        }
+        // Static validation only - no HTTP requests during build
+        result.warnings.push("HTTP-based health check validation disabled during build".to_string());
         
         Ok(())
     }
@@ -468,7 +361,6 @@ mod tests {
     use super::*;
     use crate::docs::ApiDoc;
     use utoipa::OpenApi;
-
     #[test]
     fn test_openapi_validator_creation() {
         let spec = ApiDoc::openapi();

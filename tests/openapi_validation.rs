@@ -8,7 +8,7 @@ use std::collections::HashSet;
 
 #[cfg(test)]
 mod openapi_validation_tests {
-    use super::*;
+    use super::helpers::*;
     use server::docs::ApiDoc;
     use utoipa::OpenApi;
 
@@ -297,79 +297,81 @@ mod openapi_validation_tests {
             }
         }
     }
-}
-
 /// Helper functions for OpenAPI validation
+#[cfg(test)]
+mod helpers {
+    use super::*;
 
-fn is_http_method(method: &str) -> bool {
-    matches!(method.to_lowercase().as_str(), 
-        "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "trace"
-    )
-}
+    pub(crate) fn is_http_method(method: &str) -> bool {
+        matches!(method.to_lowercase().as_str(),
+            "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "trace"
+        )
+    }
 
-fn validate_operation_responses(path: &str, method: &str, responses: &Value) {
-    let responses_obj = responses.as_object().expect("Responses should be an object");
-    
-    assert!(
-        !responses_obj.is_empty(),
-        "Operation {} {} must have at least one response",
-        method.to_uppercase(),
-        path
-    );
-    
-    // Validate that we have at least one success response (2xx)
-    let has_success_response = responses_obj.keys().any(|status_code| {
-        status_code.starts_with('2') || status_code == "default"
-    });
-    
-    assert!(
-        has_success_response,
-        "Operation {} {} must have at least one success response (2xx)",
-        method.to_uppercase(),
-        path
-    );
-}
+    pub(crate) fn validate_operation_responses(path: &str, method: &str, responses: &Value) {
+        let responses_obj = responses.as_object().expect("Responses should be an object");
 
-fn collect_schema_references(value: &Value, references: &mut HashSet<String>) {
-    match value {
-        Value::Object(obj) => {
-            // Check for $ref
-            if let Some(ref_value) = obj.get("$ref") {
-                if let Some(ref_str) = ref_value.as_str() {
-                    if let Some(schema_name) = extract_schema_name(ref_str) {
-                        references.insert(schema_name);
+        assert!(
+            !responses_obj.is_empty(),
+            "Operation {} {} must have at least one response",
+            method.to_uppercase(),
+            path
+        );
+
+        // Validate that we have at least one success response (2xx)
+        let has_success_response = responses_obj.keys().any(|status_code| {
+            status_code.starts_with('2') || status_code == "default"
+        });
+
+        assert!(
+            has_success_response,
+            "Operation {} {} must have at least one success response (2xx)",
+            method.to_uppercase(),
+            path
+        );
+    }
+
+    pub(crate) fn collect_schema_references(value: &Value, references: &mut HashSet<String>) {
+        match value {
+            Value::Object(obj) => {
+                // Check for $ref
+                if let Some(ref_value) = obj.get("$ref") {
+                    if let Some(ref_str) = ref_value.as_str() {
+                        if let Some(schema_name) = extract_schema_name(ref_str) {
+                            references.insert(schema_name);
+                        }
                     }
                 }
-            }
-            
-            // Recursively check all object values
-            for val in obj.values() {
-                collect_schema_references(val, references);
-            }
-        }
-        Value::Array(arr) => {
-            // Recursively check all array elements
-            for val in arr {
-                collect_schema_references(val, references);
-            }
-        }
-        _ => {} // Primitive values don't contain references
-    }
-}
 
-fn extract_schema_name(ref_str: &str) -> Option<String> {
-    // Extract schema name from reference like "#/components/schemas/SchemaName"
-    if ref_str.starts_with("#/components/schemas/") {
-        Some(ref_str.replace("#/components/schemas/", ""))
-    } else {
-        None
+                // Recursively check all object values
+                for val in obj.values() {
+                    collect_schema_references(val, references);
+                }
+            }
+            Value::Array(arr) => {
+                // Recursively check all array elements
+                for val in arr {
+                    collect_schema_references(val, references);
+                }
+            }
+            _ => {} // Primitive values don't contain references
+        }
+    }
+
+    pub(crate) fn extract_schema_name(ref_str: &str) -> Option<String> {
+        // Extract schema name from reference like "#/components/schemas/SchemaName"
+        if ref_str.starts_with("#/components/schemas/") {
+            Some(ref_str.replace("#/components/schemas/", ""))
+        } else {
+            None
+        }
     }
 }
 
 /// Performance and quality tests for OpenAPI spec
 #[cfg(test)]
 mod openapi_quality_tests {
-    use super::*;
+    use super::helpers::*;
     use server::docs::ApiDoc;
     use utoipa::OpenApi;
 
