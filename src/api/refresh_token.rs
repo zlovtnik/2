@@ -15,11 +15,14 @@ fn refresh_token_crud_box(pool: PgPool) -> Box<dyn Crud<RefreshToken, Uuid> + Se
     path = "/api/v1/refresh_tokens",
     request_body = RefreshToken,
     responses(
-        (status = 201, description = "Refresh token created successfully", body = RefreshToken),
-        (status = 409, description = "Refresh token with ID already exists"),
-        (status = 500, description = "Database error")
+        (status = 201, description = "Kitchen staff session token created successfully - Rate limit: 30 req/min with 5 burst allowance", body = RefreshToken),
+        (status = 409, description = "Session token with ID already exists"),
+        (status = 500, description = "Database error during token creation")
     ),
-    tag = "tokens"
+    tag = "Session & Token Management",
+    security(
+        ("bearer_auth" = [])
+    )
 )]
 pub async fn create_refresh_token(State(pool): State<PgPool>, Json(token): Json<RefreshToken>) -> impl IntoResponse {
     info!(token_id = %token.id, user_id = %token.user_id, "Creating new refresh token");
@@ -58,14 +61,17 @@ pub async fn create_refresh_token(State(pool): State<PgPool>, Json(token): Json<
     get,
     path = "/api/v1/refresh_tokens/{id}",
     params(
-        ("id" = Uuid, Path, description = "Refresh token ID to retrieve")
+        ("id" = Uuid, Path, description = "Kitchen staff session token ID to retrieve")
     ),
     responses(
-        (status = 200, description = "Refresh token found", body = RefreshToken),
-        (status = 404, description = "Refresh token not found"),
-        (status = 500, description = "Database error")
+        (status = 200, description = "Kitchen staff session token found - Rate limit: 60 req/min with 10 burst allowance", body = RefreshToken),
+        (status = 404, description = "Session token not found or expired"),
+        (status = 500, description = "Database error during token retrieval")
     ),
-    tag = "tokens"
+    tag = "Session & Token Management",
+    security(
+        ("bearer_auth" = [])
+    )
 )]
 pub async fn get_refresh_token(State(pool): State<PgPool>, Path(id): Path<Uuid>) -> impl IntoResponse {
     info!(token_id = %id, "Getting refresh token");
@@ -95,14 +101,17 @@ pub async fn get_refresh_token(State(pool): State<PgPool>, Path(id): Path<Uuid>)
     delete,
     path = "/api/v1/refresh_tokens/{id}",
     params(
-        ("id" = Uuid, Path, description = "Refresh token ID to delete")
+        ("id" = Uuid, Path, description = "Kitchen staff session token ID to revoke")
     ),
     responses(
-        (status = 204, description = "Refresh token deleted successfully"),
-        (status = 404, description = "Refresh token not found"),
-        (status = 500, description = "Database error")
+        (status = 204, description = "Kitchen staff session token revoked successfully - Rate limit: 20 req/min with 3 burst allowance"),
+        (status = 404, description = "Session token not found"),
+        (status = 500, description = "Database error during token revocation")
     ),
-    tag = "tokens"
+    tag = "Session & Token Management",
+    security(
+        ("bearer_auth" = [])
+    )
 )]
 pub async fn delete_refresh_token(State(pool): State<PgPool>, Path(id): Path<Uuid>) -> impl IntoResponse {
     info!(token_id = %id, "Deleting refresh token");
@@ -132,15 +141,18 @@ pub async fn delete_refresh_token(State(pool): State<PgPool>, Path(id): Path<Uui
     put,
     path = "/api/v1/refresh_tokens/{id}",
     params(
-        ("id" = Uuid, Path, description = "Refresh token ID to update")
+        ("id" = Uuid, Path, description = "Kitchen staff session token ID to update")
     ),
     request_body = String,
     responses(
-        (status = 200, description = "Refresh token updated successfully", body = RefreshToken),
-        (status = 404, description = "Refresh token not found"),
-        (status = 500, description = "Database error")
+        (status = 200, description = "Kitchen staff session token updated successfully - Rate limit: 30 req/min with 5 burst allowance", body = RefreshToken),
+        (status = 404, description = "Session token not found"),
+        (status = 500, description = "Database error during token update")
     ),
-    tag = "tokens"
+    tag = "Session & Token Management",
+    security(
+        ("bearer_auth" = [])
+    )
 )]
 pub async fn update_refresh_token(State(pool): State<PgPool>, Path(id): Path<Uuid>, Json(new_token): Json<String>) -> impl IntoResponse {
     info!(token_id = %id, "Updating refresh token");

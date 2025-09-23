@@ -344,10 +344,11 @@ pub struct TokenResponse {
     path = "/api/v1/auth/register",
     request_body = RegisterRequest,
     responses(
-        (status = 200, description = "User registered", body = TokenResponse),
-        (status = 400, description = "Validation failed", body = ValidationErrorResponse),
-        (status = 500, description = "Registration failed")
-    )
+        (status = 200, description = "Kitchen staff member registered successfully - Rate limit: 10 req/min with 2 burst allowance", body = TokenResponse),
+        (status = 400, description = "Registration validation failed", body = ValidationErrorResponse),
+        (status = 500, description = "Registration failed due to server error")
+    ),
+    tag = "Kitchen Staff Authentication"
 )]
 pub async fn register(State(pool): State<PgPool>, Json(mut payload): Json<RegisterRequest>) -> Result<Json<TokenResponse>, AuthError> {
     info!(email = %payload.email, "Registration attempt");
@@ -507,10 +508,11 @@ pub async fn register(State(pool): State<PgPool>, Json(mut payload): Json<Regist
     path = "/api/v1/auth/login",
     request_body = LoginRequest,
     responses(
-        (status = 200, description = "User logged in", body = TokenResponse),
-        (status = 400, description = "Validation failed", body = ValidationErrorResponse),
-        (status = 401, description = "Invalid credentials")
-    )
+        (status = 200, description = "Kitchen staff member authenticated successfully - Rate limit: 10 req/min with 2 burst allowance", body = TokenResponse),
+        (status = 400, description = "Login validation failed", body = ValidationErrorResponse),
+        (status = 401, description = "Invalid kitchen staff credentials")
+    ),
+    tag = "Kitchen Staff Authentication"
 )]
 pub async fn login(State(pool): State<PgPool>, Json(mut payload): Json<LoginRequest>) -> Result<Json<TokenResponse>, AuthError> {
     info!(email = %payload.email, "Login attempt");
@@ -607,7 +609,11 @@ pub async fn login(State(pool): State<PgPool>, Json(mut payload): Json<LoginRequ
     post,
     path = "/api/v1/auth/refresh",
     responses(
-        (status = 200, description = "Token refreshed")
+        (status = 200, description = "Kitchen staff authentication token refreshed successfully - Rate limit: 20 req/min with 5 burst allowance")
+    ),
+    tag = "Kitchen Staff Authentication",
+    security(
+        ("bearer_auth" = [])
     )
 )]
 pub async fn refresh() -> impl IntoResponse {

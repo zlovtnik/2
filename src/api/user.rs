@@ -30,11 +30,14 @@ fn user_crud_box(pool: PgPool) -> Box<dyn Crud<User, Uuid> + Send + Sync> {
     path = "/api/v1/users",
     request_body = User,
     responses(
-        (status = 201, description = "User created successfully", body = User),
-        (status = 409, description = "User with email already exists"),
-        (status = 500, description = "Database error")
+        (status = 201, description = "Kitchen staff member created successfully - Rate limit: 20 req/min with 3 burst allowance", body = User),
+        (status = 409, description = "Kitchen staff member with email already exists"),
+        (status = 500, description = "Database error during staff creation")
     ),
-    tag = "users"
+    tag = "Kitchen Staff Management",
+    security(
+        ("bearer_auth" = [])
+    )
 )]
 pub async fn create_user(State(pool): State<PgPool>, Json(user): Json<User>) -> impl IntoResponse {
     info!(user_id = %user.id, email = %user.email, "Creating new user");
@@ -75,15 +78,18 @@ pub async fn create_user(State(pool): State<PgPool>, Json(user): Json<User>) -> 
     get,
     path = "/api/v1/users/{id}",
     params(
-        ("id" = Uuid, Path, description = "User ID to retrieve")
+        ("id" = Uuid, Path, description = "Kitchen staff member ID to retrieve")
     ),
     responses(
-        (status = 200, description = "User found"),
-        (status = 404, description = "User not found"),
-        (status = 401, description = "Authentication required"),
+        (status = 200, description = "Kitchen staff member found - Rate limit: 50 req/min with 10 burst allowance"),
+        (status = 404, description = "Kitchen staff member not found"),
+        (status = 401, description = "Kitchen authentication required"),
         (status = 500, description = "Database error")
     ),
-    tag = "users"
+    tag = "Kitchen Staff Management",
+    security(
+        ("bearer_auth" = [])
+    )
 )]
 pub async fn get_user(State(pool): State<PgPool>, Path(id): Path<Uuid>, AuthenticatedUser(user_id): AuthenticatedUser) -> impl IntoResponse {
     info!(requested_user_id = %id, authenticated_user_id = %user_id, "Getting user");
@@ -114,14 +120,17 @@ pub async fn get_user(State(pool): State<PgPool>, Path(id): Path<Uuid>, Authenti
     delete,
     path = "/api/v1/users/{id}",
     params(
-        ("id" = Uuid, Path, description = "User ID to delete")
+        ("id" = Uuid, Path, description = "Kitchen staff member ID to remove")
     ),
     responses(
-        (status = 204, description = "User deleted successfully"),
-        (status = 404, description = "User not found"),
-        (status = 500, description = "Database error")
+        (status = 204, description = "Kitchen staff member removed successfully - Rate limit: 10 req/min with 2 burst allowance"),
+        (status = 404, description = "Kitchen staff member not found"),
+        (status = 500, description = "Database error during staff removal")
     ),
-    tag = "users"
+    tag = "Kitchen Staff Management",
+    security(
+        ("bearer_auth" = [])
+    )
 )]
 pub async fn delete_user(State(pool): State<PgPool>, Path(id): Path<Uuid>) -> impl IntoResponse {
     info!(user_id = %id, "Deleting user");
@@ -150,12 +159,15 @@ pub async fn delete_user(State(pool): State<PgPool>, Path(id): Path<Uuid>) -> im
     get,
     path = "/api/v1/user/profile",
     responses(
-        (status = 200, description = "Current user profile", body = User),
-        (status = 404, description = "User not found"),
-        (status = 401, description = "Authentication required"),
+        (status = 200, description = "Current kitchen staff member profile - Rate limit: 60 req/min with 15 burst allowance", body = User),
+        (status = 404, description = "Kitchen staff member profile not found"),
+        (status = 401, description = "Kitchen authentication required"),
         (status = 500, description = "Database error")
     ),
-    tag = "users"
+    tag = "Kitchen Staff Management",
+    security(
+        ("bearer_auth" = [])
+    )
 )]
 pub async fn get_current_user(AuthenticatedUser(user_id): AuthenticatedUser, State(pool): State<PgPool>) -> impl IntoResponse {
     info!(user_id = %user_id, "Getting current user profile");
@@ -185,12 +197,15 @@ pub async fn get_current_user(AuthenticatedUser(user_id): AuthenticatedUser, Sta
     get,
     path = "/api/v1/user/stats",
     responses(
-        (status = 200, description = "Current user statistics", body = UserInfoWithStats),
-        (status = 404, description = "User not found"),
-        (status = 401, description = "Authentication required"),
+        (status = 200, description = "Current kitchen staff member statistics and performance metrics - Rate limit: 30 req/min with 5 burst allowance", body = UserInfoWithStats),
+        (status = 404, description = "Kitchen staff member not found"),
+        (status = 401, description = "Kitchen authentication required"),
         (status = 500, description = "Database error")
     ),
-    tag = "users"
+    tag = "Kitchen Staff Management",
+    security(
+        ("bearer_auth" = [])
+    )
 )]
 pub async fn get_current_user_stats(
     AuthenticatedUser(user_id): AuthenticatedUser, 
@@ -238,15 +253,18 @@ pub async fn get_current_user_stats(
     put,
     path = "/api/v1/users/{id}",
     params(
-        ("id" = Uuid, Path, description = "User ID to update")
+        ("id" = Uuid, Path, description = "Kitchen staff member ID to update")
     ),
     request_body = String,
     responses(
-        (status = 200, description = "User updated successfully", body = User),
-        (status = 404, description = "User not found"),
-        (status = 500, description = "Database error")
+        (status = 200, description = "Kitchen staff member updated successfully - Rate limit: 20 req/min with 3 burst allowance", body = User),
+        (status = 404, description = "Kitchen staff member not found"),
+        (status = 500, description = "Database error during staff update")
     ),
-    tag = "users"
+    tag = "Kitchen Staff Management",
+    security(
+        ("bearer_auth" = [])
+    )
 )]
 pub async fn update_user(State(pool): State<PgPool>, Path(id): Path<Uuid>, Json(new_name): Json<String>) -> impl IntoResponse {
     info!(user_id = %id, new_name = %new_name, "Updating user");

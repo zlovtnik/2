@@ -32,6 +32,7 @@ dashmap = "6.0"
 
 # Validation
 validator = { version = "0.18", features = ["derive"] }
+thiserror = "1.0"
 
 # API Documentation
 utoipa = { version = "4.0.0", features = ["axum_extras", "chrono", "uuid"] }
