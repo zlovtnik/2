@@ -135,16 +135,16 @@ impl OpenApiValidator {
     }
     
     fn validate_operations(&self, path: &str, path_item: &utoipa::openapi::path::PathItem, result: &mut ValidationResult) -> Result<(), DocumentationError> {
-        for (_method, op) in &path_item.operations {
+    for (method, op) in &path_item.operations {
             // Validate that operation has summary or description
             if op.summary.is_none() && op.description.is_none() {
-                result.missing_docs.push(format!("{} - missing summary or description", path));
+                result.missing_docs.push(format!("{} {} - missing summary or description", path_item_type_to_str(method), path));
                 result.success = false;
             }
 
             // Validate that operation has responses
             if op.responses.responses.is_empty() {
-                result.schema_errors.push(format!("{} - missing responses", path));
+                result.schema_errors.push(format!("{} {} - missing responses", path_item_type_to_str(method), path));
                 result.success = false;
             }
 
@@ -155,7 +155,7 @@ impl OpenApiValidator {
                 });
 
                 if !has_error_responses {
-                    result.warnings.push(format!("{} - consider adding error responses", path));
+                    result.warnings.push(format!("{} {} - consider adding error responses", path_item_type_to_str(method), path));
                 }
             }
         }
@@ -166,27 +166,31 @@ impl OpenApiValidator {
     fn validate_schemas(&self, result: &mut ValidationResult) -> Result<(), DocumentationError> {
         if let Some(components) = &self.spec.components {
             let schemas = &components.schemas;
-            let spec_json = serde_json::to_value(&self.spec)
-                .map_err(|e| DocumentationError::SchemaValidationFailed {
-                    schema: "spec".to_string(),
-                    error: e.to_string(),
-                })?;
+            if schemas.is_empty() {
+                result.warnings.push("OpenAPI components present but no schemas defined; skipping schema reference checks".to_string());
+            } else {
+                let spec_json = serde_json::to_value(&self.spec)
+                    .map_err(|e| DocumentationError::SchemaValidationFailed {
+                        schema: "spec".to_string(),
+                        error: e.to_string(),
+                    })?;
 
-            let mut referenced_schemas = HashSet::new();
-            collect_schema_references(&spec_json, &mut referenced_schemas);
+                let mut referenced_schemas = HashSet::new();
+                collect_schema_references(&spec_json, &mut referenced_schemas);
 
-            // Check that all referenced schemas are defined
-            for referenced in &referenced_schemas {
-                if !schemas.contains_key(referenced) {
-                    result.schema_errors.push(format!("Referenced schema '{}' is not defined", referenced));
-                    result.success = false;
+                // Check that all referenced schemas are defined
+                for referenced in &referenced_schemas {
+                    if !schemas.contains_key(referenced) {
+                        result.schema_errors.push(format!("Referenced schema '{}' is not defined", referenced));
+                        result.success = false;
+                    }
                 }
-            }
 
-            // Warn about unused schemas
-            for (schema_name, _) in schemas {
-                if !referenced_schemas.contains(schema_name) {
-                    result.warnings.push(format!("Schema '{}' is defined but not referenced", schema_name));
+                // Warn about unused schemas
+                for (schema_name, _) in schemas {
+                    if !referenced_schemas.contains(schema_name) {
+                        result.warnings.push(format!("Schema '{}' is defined but not referenced", schema_name));
+                    }
                 }
             }
         }
@@ -263,6 +267,22 @@ fn extract_schema_name(ref_str: &str) -> Option<String> {
         Some(ref_str.replace("#/components/schemas/", ""))
     } else {
         None
+    }
+}
+
+/// Convert a PathItem key to a readable HTTP method string
+fn path_item_type_to_str(method: &utoipa::openapi::path::PathItemType) -> &'static str {
+    // PathItemType variants correspond to HTTP methods; match to human-readable strings
+    match method {
+        utoipa::openapi::path::PathItemType::Get => "GET",
+        utoipa::openapi::path::PathItemType::Post => "POST",
+        utoipa::openapi::path::PathItemType::Put => "PUT",
+        utoipa::openapi::path::PathItemType::Delete => "DELETE",
+        utoipa::openapi::path::PathItemType::Patch => "PATCH",
+        utoipa::openapi::path::PathItemType::Head => "HEAD",
+        utoipa::openapi::path::PathItemType::Options => "OPTIONS",
+        utoipa::openapi::path::PathItemType::Trace => "TRACE",
+        _ => "UNKNOWN",
     }
 }
 

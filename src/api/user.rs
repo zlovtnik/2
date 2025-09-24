@@ -82,7 +82,7 @@ pub async fn create_user(State(pool): State<PgPool>, Json(user): Json<User>) -> 
                 // Or adjust the central mapping so named errors map to appropriate
                 // status codes. Similar locations that may need review: 111-116,
                 // 150-155, 188-193, 245-248, 292-297, 303-307.
-                ErrorResponse::new("User already exists", Some("Email address is already registered".to_string())).into_response()
+                (StatusCode::CONFLICT, Json(ErrorResponse::new("User already exists", Some("Email address is already registered".to_string())))).into_response()
             } else {
                 ErrorResponse::new("Database error", Some(e.to_string())).into_response()
             }
@@ -124,11 +124,11 @@ pub async fn get_user(State(pool): State<PgPool>, Path(id): Path<Uuid>, Authenti
         },
         Ok(None) => {
             warn!(user_id = %id, authenticated_user_id = %user_id, "User not found");
-            ErrorResponse::new("User not found", None).into_response()
+            (StatusCode::NOT_FOUND, Json(ErrorResponse::new("User not found", None))).into_response()
         },
         Err(e) => {
             error!(user_id = %id, authenticated_user_id = %user_id, error = %e, "Failed to retrieve user");
-            ErrorResponse::new("Database error", Some(e.to_string())).into_response()
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse::new("Database error", Some(e.to_string())))).into_response()
         },
     }
 }
@@ -151,6 +151,13 @@ pub async fn get_user(State(pool): State<PgPool>, Path(id): Path<Uuid>, Authenti
 )]
 pub async fn delete_user(AuthenticatedUser(user_id): AuthenticatedUser, State(pool): State<PgPool>, Path(id): Path<Uuid>) -> impl IntoResponse {
     info!(user_id = %id, authenticated_user_id = %user_id, "Deleting user");
+
+    // Authorization: allow if requester is the same user. Admin role checks
+    // are not implemented yet; extend this block if role claims are added.
+    if user_id != id {
+        warn!(requested_id = %id, authenticated_user_id = %user_id, "Unauthorized delete attempt - users may only delete their own account");
+        return (StatusCode::FORBIDDEN, ErrorResponse::new("Forbidden", Some("You are not allowed to delete this user".to_string()))).into_response();
+    }
     debug!("Creating user CRUD instance for deletion");
     
     let crud = user_crud_box(pool);
@@ -163,11 +170,11 @@ pub async fn delete_user(AuthenticatedUser(user_id): AuthenticatedUser, State(po
         },
         Ok(affected) => {
             warn!(user_id = %id, affected_rows = affected, "User not found for deletion");
-            ErrorResponse::new("User not found", None).into_response()
+            (StatusCode::NOT_FOUND, Json(ErrorResponse::new("User not found", None))).into_response()
         },
         Err(e) => {
             error!(user_id = %id, error = %e, "Failed to delete user");
-            ErrorResponse::new("Database error", Some(e.to_string())).into_response()
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse::new("Database error", Some(e.to_string())))).into_response()
         },
     }
 }
@@ -201,11 +208,11 @@ pub async fn get_current_user(AuthenticatedUser(user_id): AuthenticatedUser, Sta
         },
         Ok(None) => {
             warn!(user_id = %user_id, "Current user not found in database");
-            ErrorResponse::new("User not found", None).into_response()
+            (StatusCode::NOT_FOUND, Json(ErrorResponse::new("User not found", None))).into_response()
         },
         Err(e) => {
             error!(user_id = %user_id, error = %e, "Failed to retrieve current user");
-            ErrorResponse::new("Database error", Some(e.to_string())).into_response()
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse::new("Database error", Some(e.to_string())))).into_response()
         },
     }
 }
@@ -285,6 +292,14 @@ pub async fn get_current_user_stats(
 )]
 pub async fn update_user(AuthenticatedUser(user_id): AuthenticatedUser, State(pool): State<PgPool>, Path(id): Path<Uuid>, Json(new_name): Json<String>) -> impl IntoResponse {
     info!(user_id = %id, authenticated_user_id = %user_id, new_name = %new_name, "Updating user");
+
+    // Authorization: only allow users to update their own profile. If role
+    // claims (e.g., admin) are added to AuthenticatedUser, update this logic
+    // to allow admins to update other users.
+    if user_id != id {
+        warn!(requested_id = %id, authenticated_user_id = %user_id, "Unauthorized update attempt - users may only update their own account");
+        return (StatusCode::FORBIDDEN, ErrorResponse::new("Forbidden", Some("You are not allowed to update this user".to_string()))).into_response();
+    }
     debug!("Creating user CRUD instance for update");
     
     let crud: PgCrud<User> = PgCrud::new(pool, "users");
@@ -305,21 +320,21 @@ pub async fn update_user(AuthenticatedUser(user_id): AuthenticatedUser, State(po
                 },
                 Ok(None) => {
                     warn!(user_id = %id, "User not found during update operation");
-                    ErrorResponse::new("User not found", None).into_response()
+                    (StatusCode::NOT_FOUND, Json(ErrorResponse::new("User not found", None))).into_response()
                 },
                 Err(e) => {
                     error!(user_id = %id, error = %e, "Failed to update user");
-                    ErrorResponse::new("Database error", Some(e.to_string())).into_response()
+                    (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse::new("Database error", Some(e.to_string())))).into_response()
                 },
             }
         }
         Ok(None) => {
             warn!(user_id = %id, "User not found for update");
-            ErrorResponse::new("User not found", None).into_response()
+            (StatusCode::NOT_FOUND, Json(ErrorResponse::new("User not found", None))).into_response()
         },
         Err(e) => {
             error!(user_id = %id, error = %e, "Failed to check user existence before update");
-            ErrorResponse::new("Database error", Some(e.to_string())).into_response()
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse::new("Database error", Some(e.to_string())))).into_response()
         },
     }
 }

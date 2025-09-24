@@ -26,8 +26,13 @@ fn refresh_token_crud_box(pool: PgPool) -> Box<dyn Crud<RefreshToken, Uuid> + Se
         ("bearer_auth" = [])
     )
 )]
-pub async fn create_refresh_token(AuthenticatedUser(_user_id): AuthenticatedUser, State(pool): State<PgPool>, Json(token): Json<RefreshToken>) -> impl IntoResponse {
-    info!(token_id = %token.id, user_id = %token.user_id, "Creating new refresh token");
+pub async fn create_refresh_token(AuthenticatedUser(user_id): AuthenticatedUser, State(pool): State<PgPool>, Json(token): Json<RefreshToken>) -> impl IntoResponse {
+    info!(token_id = %token.id, user_id = %token.user_id, auth_user_id = %user_id, "Creating new refresh token");
+    // Ensure authenticated user is creating a token for themselves
+    if token.user_id != user_id {
+        warn!(token_id = %token.id, token_user_id = %token.user_id, auth_user_id = %user_id, "Authenticated user attempted to create a token for a different user");
+        return (StatusCode::FORBIDDEN, ErrorResponse::new("Forbidden", Some("Cannot create token for another user".to_string()))).into_response();
+    }
     debug!(token_id = %token.id, expires_at = %token.expires_at, "Refresh token creation details");
     
     // Direct SQLx for insert (trait object not needed for this demo)
@@ -75,15 +80,21 @@ pub async fn create_refresh_token(AuthenticatedUser(_user_id): AuthenticatedUser
         ("bearer_auth" = [])
     )
 )]
-pub async fn get_refresh_token(AuthenticatedUser(_user_id): AuthenticatedUser, State(pool): State<PgPool>, Path(id): Path<Uuid>) -> impl IntoResponse {
-    info!(token_id = %id, "Getting refresh token");
+pub async fn get_refresh_token(AuthenticatedUser(auth_user_id): AuthenticatedUser, State(pool): State<PgPool>, Path(id): Path<Uuid>) -> impl IntoResponse {
+    info!(token_id = %id, auth_user_id = %auth_user_id, "Getting refresh token");
     debug!("Creating refresh token CRUD instance");
-    
+
     let crud = refresh_token_crud_box(pool);
     debug!(token_id = %id, "Executing refresh token read query");
-    
+
     match crud.read(id).await {
         Ok(Some(token)) => {
+            // Ensure the authenticated user owns this token
+            if token.user_id != auth_user_id {
+                warn!(token_id = %id, owner_id = %token.user_id, auth_user_id = %auth_user_id, "Authenticated user is not the owner of the refresh token");
+                return (StatusCode::FORBIDDEN, ErrorResponse::new("Forbidden", Some("You are not the owner of this token".to_string()))).into_response();
+            }
+
             info!(token_id = %id, user_id = %token.user_id, "Refresh token retrieved successfully");
             debug!(token_id = %id, expires_at = %token.expires_at, "Refresh token details retrieved");
             (StatusCode::OK, Json(token)).into_response()
@@ -115,26 +126,49 @@ pub async fn get_refresh_token(AuthenticatedUser(_user_id): AuthenticatedUser, S
         ("bearer_auth" = [])
     )
 )]
-pub async fn delete_refresh_token(AuthenticatedUser(_user_id): AuthenticatedUser, State(pool): State<PgPool>, Path(id): Path<Uuid>) -> impl IntoResponse {
-    info!(token_id = %id, "Deleting refresh token");
-    debug!("Creating refresh token CRUD instance for deletion");
-    
-    let crud = refresh_token_crud_box(pool);
-    debug!(token_id = %id, "Executing refresh token delete query");
-    
-    match crud.delete(id).await {
-        Ok(affected) if affected > 0 => {
-            info!(token_id = %id, affected_rows = affected, "Refresh token deleted successfully");
-            (StatusCode::NO_CONTENT, "").into_response()
-        },
-        Ok(affected) => {
-            warn!(token_id = %id, affected_rows = affected, "Refresh token not found for deletion");
+pub async fn delete_refresh_token(AuthenticatedUser(auth_user_id): AuthenticatedUser, State(pool): State<PgPool>, Path(id): Path<Uuid>) -> impl IntoResponse {
+    info!(token_id = %id, auth_user_id = %auth_user_id, "Deleting refresh token");
+    debug!("Checking token ownership before deletion");
+
+    // First, fetch the owner of the token
+    let owner_query = "SELECT user_id FROM refresh_tokens WHERE id = $1";
+    match sqlx::query_scalar::<_, Uuid>(owner_query)
+        .bind(id)
+        .fetch_optional(&pool)
+        .await
+    {
+        Ok(Some(owner_id)) => {
+            if owner_id != auth_user_id {
+                warn!(token_id = %id, owner_id = %owner_id, auth_user_id = %auth_user_id, "Authenticated user is not the owner of the refresh token");
+                return (StatusCode::FORBIDDEN, ErrorResponse::new("Forbidden", Some("You are not the owner of this token".to_string()))).into_response();
+            }
+
+            // Owner matches; perform delete
+            let delete_sql = "DELETE FROM refresh_tokens WHERE id = $1";
+            match sqlx::query(delete_sql).bind(id).execute(&pool).await {
+                Ok(res) if res.rows_affected() > 0 => {
+                    info!(token_id = %id, affected_rows = res.rows_affected(), "Refresh token deleted successfully");
+                    (StatusCode::NO_CONTENT, "").into_response()
+                }
+                Ok(res) => {
+                    // This would be unexpected since we found the row above, but handle defensively
+                    warn!(token_id = %id, affected_rows = res.rows_affected(), "No rows affected when attempting to delete refresh token");
+                    (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some("Failed to delete token".to_string()))).into_response()
+                }
+                Err(e) => {
+                    error!(token_id = %id, error = %e, "Failed to execute delete for refresh token");
+                    (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some(e.to_string()))).into_response()
+                }
+            }
+        }
+        Ok(None) => {
+            warn!(token_id = %id, "Refresh token not found for deletion");
             (StatusCode::NOT_FOUND, ErrorResponse::new("Token not found", None)).into_response()
-        },
+        }
         Err(e) => {
-            error!(token_id = %id, error = %e, "Failed to delete refresh token");
+            error!(token_id = %id, error = %e, "Failed to query refresh token owner before deletion");
             (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some(e.to_string()))).into_response()
-        },
+        }
     }
 }
 
@@ -156,24 +190,28 @@ pub async fn delete_refresh_token(AuthenticatedUser(_user_id): AuthenticatedUser
         ("bearer_auth" = [])
     )
 )]
-pub async fn update_refresh_token(AuthenticatedUser(_user_id): AuthenticatedUser, State(pool): State<PgPool>, Path(id): Path<Uuid>, Json(new_token): Json<String>) -> impl IntoResponse {
-    info!(token_id = %id, "Updating refresh token");
+pub async fn update_refresh_token(AuthenticatedUser(auth_user_id): AuthenticatedUser, State(pool): State<PgPool>, Path(id): Path<Uuid>, Json(new_token): Json<String>) -> impl IntoResponse {
+    info!(token_id = %id, auth_user_id = %auth_user_id, "Updating refresh token");
     debug!("Creating refresh token CRUD instance for update");
-    
+
     let crud: PgCrud<RefreshToken> = PgCrud::new(pool, "refresh_tokens");
     debug!(token_id = %id, "Checking if refresh token exists before update");
-    
-    // For demonstration, fetch, update, and save using the UpdatableCrud trait
-    // In a real implementation, you'd want to update only the necessary fields
+
+    // Fetch existing token so we can verify ownership before applying changes
     match crud.read(id).await {
         Ok(Some(existing)) => {
-            info!(token_id = %id, user_id = %existing.user_id, "Refresh token found, proceeding with update");
+            info!(token_id = %id, user_id = %existing.user_id, "Refresh token found, verifying ownership");
+            if existing.user_id != auth_user_id {
+                warn!(token_id = %id, owner_id = %existing.user_id, auth_user_id = %auth_user_id, "Authenticated user is not the owner of the refresh token");
+                return (StatusCode::FORBIDDEN, ErrorResponse::new("Forbidden", Some("You are not the owner of this token".to_string()))).into_response();
+            }
+
+            // Owner matches; proceed to update
             let update_fn = |mut t: RefreshToken| {
                 t.token = new_token.clone();
                 t
             };
             debug!(token_id = %id, "Executing refresh token update");
-            // Call update via the trait (note: this is a stub, real SQL needed)
             match UpdatableCrud::update(&crud, id, update_fn).await {
                 Ok(Some(updated)) => {
                     info!(token_id = %id, user_id = %updated.user_id, "Refresh token updated successfully");

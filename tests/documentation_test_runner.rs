@@ -7,7 +7,6 @@ use std::env;
 use std::time::Instant;
 use tokio::time::{sleep, Duration};
 use std::net::SocketAddr;
-// reqwest::Client imported where needed in async tests
 
 #[cfg(test)]
 mod documentation_integration_tests {
@@ -346,22 +345,18 @@ mod documentation_quality_tests {
 fn count_paths_with_descriptions(spec: &utoipa::openapi::OpenApi) -> usize {
     spec.paths.paths.iter()
         .filter(|(_, path_item)| {
-            // Serialize path_item and inspect JSON
-            let json = serde_json::to_value(path_item).unwrap_or(serde_json::Value::Null);
-            if json.get("description").and_then(|v| v.as_str()).is_some() {
+            // Check PathItem description directly
+            if path_item.description.is_some() {
                 return true;
             }
-            if let Some(obj) = json.as_object() {
-                for (method, op) in obj {
-                    if is_http_method(method) {
-                        if let Some(op_obj) = op.as_object() {
-                            if op_obj.get("description").is_some() || op_obj.get("summary").is_some() {
-                                return true;
-                            }
-                        }
-                    }
+
+            // Iterate operations on the PathItem and check each Operation's description/summary
+            for (_method, operation) in &path_item.operations {
+                if operation.description.is_some() || operation.summary.is_some() {
+                    return true;
                 }
             }
+
             false
         })
         .count()
@@ -373,10 +368,8 @@ fn count_paths_with_descriptions(spec: &utoipa::openapi::OpenApi) -> usize {
 fn count_total_operations(spec: &utoipa::openapi::OpenApi) -> usize {
     spec.paths.paths.iter()
         .map(|(_, path_item)| {
-            let json = serde_json::to_value(path_item).unwrap_or(serde_json::Value::Null);
-            if let Some(obj) = json.as_object() {
-                obj.keys().filter(|k| is_http_method(k)).count()
-            } else { 0 }
+            // Count operations directly from the PathItem
+            path_item.operations.len()
         })
         .sum()
 }
