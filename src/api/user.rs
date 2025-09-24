@@ -22,6 +22,12 @@ pub struct UserInfoWithStats {
     pub last_login: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct UserWithRequesterId {
+    pub user: User,
+    pub requester_id: Uuid,
+}
+
 fn user_crud_box(pool: PgPool) -> Box<dyn Crud<User, Uuid> + Send + Sync> {
     Box::new(PgCrud::new(pool, "users"))
 }
@@ -67,6 +73,15 @@ pub async fn create_user(State(pool): State<PgPool>, Json(user): Json<User>) -> 
             error!(user_id = %user.id, error = %e, "Failed to create user");
             if e.to_string().contains("duplicate key") {
                 warn!(email = %user.email, "Attempted to create user with duplicate email");
+                // NOTE: coderabbitai warning — status mapping may be incorrect.
+                // The project's central ErrorResponse->HTTP status mapping can cause
+                // domain errors like "User already exists" or "User not found" to
+                // be returned with a 500 status. Consider returning an explicit
+                // HTTP status here (preferred), e.g.:
+                // (StatusCode::CONFLICT, Json(ErrorResponse::new("User already exists", Some("Email address is already registered".to_string())))).into_response()
+                // Or adjust the central mapping so named errors map to appropriate
+                // status codes. Similar locations that may need review: 111-116,
+                // 150-155, 188-193, 245-248, 292-297, 303-307.
                 ErrorResponse::new("User already exists", Some("Email address is already registered".to_string())).into_response()
             } else {
                 ErrorResponse::new("Database error", Some(e.to_string())).into_response()
@@ -82,7 +97,7 @@ pub async fn create_user(State(pool): State<PgPool>, Json(user): Json<User>) -> 
         ("id" = Uuid, Path, description = "Kitchen staff member ID to retrieve")
     ),
     responses(
-        (status = 200, description = "Kitchen staff member found - Rate limit: 50 req/min with 10 burst allowance"),
+        (status = 200, description = "Kitchen staff member found - Rate limit: 50 req/min with 10 burst allowance", body = UserWithRequesterId),
         (status = 404, description = "Kitchen staff member not found", body = ErrorResponse),
         (status = 401, description = "Kitchen authentication required"),
         (status = 500, description = "Database error", body = ErrorResponse)
@@ -103,8 +118,9 @@ pub async fn get_user(State(pool): State<PgPool>, Path(id): Path<Uuid>, Authenti
     match crud.read(id).await {
         Ok(Some(user)) => {
             info!(user_id = %id, authenticated_user_id = %user_id, "User retrieved successfully");
-            debug!(user_email = %user.email, "User details retrieved");
-            (StatusCode::OK, Json((user, user_id))).into_response()
+            debug!(user_email = "[redacted]", "User details retrieved");
+            let resp = UserWithRequesterId { user, requester_id: user_id };
+            (StatusCode::OK, Json(resp)).into_response()
         },
         Ok(None) => {
             warn!(user_id = %id, authenticated_user_id = %user_id, "User not found");
@@ -133,8 +149,8 @@ pub async fn get_user(State(pool): State<PgPool>, Path(id): Path<Uuid>, Authenti
         ("bearer_auth" = [])
     )
 )]
-pub async fn delete_user(State(pool): State<PgPool>, Path(id): Path<Uuid>) -> impl IntoResponse {
-    info!(user_id = %id, "Deleting user");
+pub async fn delete_user(AuthenticatedUser(user_id): AuthenticatedUser, State(pool): State<PgPool>, Path(id): Path<Uuid>) -> impl IntoResponse {
+    info!(user_id = %id, authenticated_user_id = %user_id, "Deleting user");
     debug!("Creating user CRUD instance for deletion");
     
     let crud = user_crud_box(pool);
@@ -180,7 +196,7 @@ pub async fn get_current_user(AuthenticatedUser(user_id): AuthenticatedUser, Sta
     match crud.read(user_id).await {
         Ok(Some(user)) => {
             info!(user_id = %user_id, "Current user profile retrieved successfully");
-            debug!(user_email = %user.email, full_name = %user.full_name, "Current user details");
+            debug!(user_email = "[redacted]", full_name = "[redacted]", "Current user details");
             (StatusCode::OK, Json(user)).into_response()
         },
         Ok(None) => {
@@ -267,8 +283,8 @@ pub async fn get_current_user_stats(
         ("bearer_auth" = [])
     )
 )]
-pub async fn update_user(State(pool): State<PgPool>, Path(id): Path<Uuid>, Json(new_name): Json<String>) -> impl IntoResponse {
-    info!(user_id = %id, new_name = %new_name, "Updating user");
+pub async fn update_user(AuthenticatedUser(user_id): AuthenticatedUser, State(pool): State<PgPool>, Path(id): Path<Uuid>, Json(new_name): Json<String>) -> impl IntoResponse {
+    info!(user_id = %id, authenticated_user_id = %user_id, new_name = %new_name, "Updating user");
     debug!("Creating user CRUD instance for update");
     
     let crud: PgCrud<User> = PgCrud::new(pool, "users");

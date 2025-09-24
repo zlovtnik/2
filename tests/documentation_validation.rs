@@ -4,7 +4,7 @@
 //! have proper documentation, OpenAPI specifications are valid and complete,
 //! and code examples compile and execute correctly.
 
-use std::collections::HashSet;
+// HashSet removed; imports are scoped per-test modules
 use std::process::Command;
 use serde_json::Value;
 use tokio::time::{sleep, Duration};
@@ -79,11 +79,11 @@ mod documentation_tests {
         assert!(spec.info.contact.is_some());
         assert!(spec.info.license.is_some());
         
-        // Validate servers
-        assert!(!spec.servers.is_empty(), "OpenAPI spec should have server configurations");
+    // Validate servers (servers may be optional)
+    assert!(spec.servers.as_ref().map(|s| !s.is_empty()).unwrap_or(false), "OpenAPI spec should have server configurations");
         
-        // Validate tags
-        assert!(!spec.tags.is_empty(), "OpenAPI spec should have tags for organization");
+    // Validate tags (tags may be optional)
+    assert!(spec.tags.as_ref().map(|t| !t.is_empty()).unwrap_or(false), "OpenAPI spec should have tags for organization");
         
         // Validate external docs
         assert!(spec.external_docs.is_some(), "OpenAPI spec should have external documentation links");
@@ -94,8 +94,10 @@ mod documentation_tests {
     fn test_openapi_schemas_complete() {
         let spec = ApiDoc::openapi();
         
-        if let Some(components) = &spec.components {
-            if let Some(schemas) = &components.schemas {
+        // Inspect serialized spec JSON for components.schemas
+        let spec_json = serde_json::to_value(&spec).expect("Should serialize spec");
+        if let Some(components) = spec_json.get("components") {
+            if let Some(schemas) = components.get("schemas") {
                 // Expected core schemas
                 let expected_schemas = vec![
                     "RegisterRequest",
@@ -110,8 +112,9 @@ mod documentation_tests {
                 ];
 
                 for schema_name in expected_schemas {
+                    let present = schemas.as_object().map(|m| m.contains_key(schema_name)).unwrap_or(false);
                     assert!(
-                        schemas.contains_key(schema_name),
+                        present,
                         "Missing schema in OpenAPI spec: {}",
                         schema_name
                     );
@@ -329,18 +332,13 @@ fn find_undocumented_apis() -> Vec<String> {
     
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        
-        // Parse the output to extract missing documentation warnings
-        for line in stderr.lines() {
-            if line.contains("missing documentation for") {
-                // Extract the API name from the warning message
-                if let Some(start) = line.find("missing documentation for ") {
-                    let api_part = &line[start + 26..];
-                    if let Some(end) = api_part.find('`') {
-                        let api_name = &api_part[1..end];
-                        missing_docs.push(api_name.to_string());
-                    }
-                }
+
+        // Use a regex to robustly extract backticked API names from warnings,
+        // e.g. "missing documentation for ... `crate::api::foo::bar`".
+        let re = regex::Regex::new(r"missing documentation for.*?`([^`]+)`").unwrap();
+        for cap in re.captures_iter(&stderr) {
+            if let Some(m) = cap.get(1) {
+                missing_docs.push(m.as_str().to_string());
             }
         }
     }
@@ -349,44 +347,56 @@ fn find_undocumented_apis() -> Vec<String> {
 }
 
 fn validate_openapi_spec(spec: &utoipa::openapi::OpenApi) -> Result<(), String> {
-    // Validate basic structure
-    if spec.info.title.is_empty() {
+    // Serialize to JSON and validate the common OpenAPI shape to avoid relying on utoipa internals
+    let spec_json = serde_json::to_value(spec).map_err(|e| format!("Failed to serialize spec: {}", e))?;
+
+    // Basic checks
+    if spec_json["info"]["title"].as_str().map(|s| s.is_empty()).unwrap_or(true) {
         return Err("OpenAPI spec must have a title".to_string());
     }
-    
-    if spec.info.version.is_empty() {
+
+    if spec_json["info"]["version"].as_str().map(|s| s.is_empty()).unwrap_or(true) {
         return Err("OpenAPI spec must have a version".to_string());
     }
-    
-    if spec.paths.paths.is_empty() {
+
+    if !spec_json["paths"].is_object() || spec_json["paths"].as_object().unwrap().is_empty() {
         return Err("OpenAPI spec must have at least one path".to_string());
     }
-    
-    // Validate that all paths have proper operations
-    for (path, path_item) in &spec.paths.paths {
-        let has_operations = path_item.get.is_some() 
-            || path_item.post.is_some() 
-            || path_item.put.is_some() 
-            || path_item.delete.is_some()
-            || path_item.patch.is_some()
-            || path_item.head.is_some()
-            || path_item.options.is_some()
-            || path_item.trace.is_some();
-            
-        if !has_operations {
-            return Err(format!("Path {} must have at least one HTTP operation", path));
-        }
-    }
-    
-    // Validate components if present
-    if let Some(components) = &spec.components {
-        if let Some(schemas) = &components.schemas {
-            if schemas.is_empty() {
-                return Err("If components.schemas is present, it should not be empty".to_string());
+
+    // Validate that each path has at least one HTTP operation and that operations have responses
+    if let Some(paths_obj) = spec_json["paths"].as_object() {
+        for (path, path_item) in paths_obj {
+            if let Some(path_obj) = path_item.as_object() {
+                let mut found_op = false;
+                for (method, operation) in path_obj {
+                    if matches!(method.as_str(), "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "trace") {
+                        found_op = true;
+                        if !operation.get("responses").is_some() {
+                            return Err(format!("Operation {} {} must have responses", method.to_uppercase(), path));
+                        }
+                    }
+                }
+
+                if !found_op {
+                    return Err(format!("Path {} must have at least one HTTP operation", path));
+                }
             }
         }
     }
-    
+
+    // Validate components.schemas presence
+    if let Some(components) = spec_json.get("components") {
+        if let Some(schemas) = components.get("schemas") {
+            if !schemas.is_object() || schemas.as_object().unwrap().is_empty() {
+                return Err("If components.schemas is present, it should not be empty".to_string());
+            }
+        } else {
+            return Err("OpenAPI spec should have component schemas defined".to_string());
+        }
+    } else {
+        return Err("OpenAPI spec should have components section".to_string());
+    }
+
     Ok(())
 }
 

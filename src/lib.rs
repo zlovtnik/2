@@ -5,7 +5,7 @@ use tower_http::{trace::TraceLayer, cors::{CorsLayer, Any}};
 use utoipa::OpenApi;
 use tonic::transport::Server;
 use std::net::SocketAddr;
-mod docs;
+pub mod docs;
 
 pub mod config;
 pub mod api;

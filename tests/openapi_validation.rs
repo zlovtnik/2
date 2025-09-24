@@ -3,14 +3,14 @@
 //! This module contains comprehensive tests to validate the OpenAPI specification
 //! is complete, valid, and follows best practices for API documentation.
 
-use serde_json::{Value, Map};
-use std::collections::HashSet;
+// serde_json and HashSet are imported where needed inside test modules and helpers
 
 #[cfg(test)]
 mod openapi_validation_tests {
     use super::helpers::*;
     use server::docs::ApiDoc;
     use utoipa::OpenApi;
+    use std::collections::HashSet;
 
     /// Test OpenAPI specification compliance with OpenAPI 3.0 standard
     #[test]
@@ -297,10 +297,11 @@ mod openapi_validation_tests {
             }
         }
     }
+}
 /// Helper functions for OpenAPI validation
-#[cfg(test)]
-mod helpers {
-    use super::*;
+pub mod helpers {
+    use serde_json::Value;
+    use std::collections::HashSet;
 
     pub(crate) fn is_http_method(method: &str) -> bool {
         matches!(method.to_lowercase().as_str(),
@@ -368,10 +369,10 @@ mod helpers {
     }
 }
 
+
 /// Performance and quality tests for OpenAPI spec
 #[cfg(test)]
 mod openapi_quality_tests {
-    use super::helpers::*;
     use server::docs::ApiDoc;
     use utoipa::OpenApi;
 

@@ -2509,6 +2509,7 @@ dependencies = [
  "prost",
  "rand_core 0.6.4",
  "redis",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

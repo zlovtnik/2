@@ -7,7 +7,7 @@ use std::env;
 use std::time::Instant;
 use tokio::time::{sleep, Duration};
 use std::net::SocketAddr;
-use reqwest::Client;
+// reqwest::Client imported where needed in async tests
 
 #[cfg(test)]
 mod documentation_integration_tests {
@@ -92,10 +92,9 @@ mod documentation_integration_tests {
         
         sleep(Duration::from_millis(100)).await;
         
-        // Create example validator with HTTP client
-        let client = Client::new();
-        let base_url = format!("http://{}", local_addr);
-        let validator = ExampleValidator::with_client(base_url, client);
+    // Create example validator (client not used during static validation)
+    let base_url = format!("http://{}", local_addr);
+    let validator = ExampleValidator::new(base_url);
         
         let start_time = Instant::now();
         let result = validator.validate_examples().await.expect("Example validation should not fail");
@@ -347,34 +346,37 @@ mod documentation_quality_tests {
 fn count_paths_with_descriptions(spec: &utoipa::openapi::OpenApi) -> usize {
     spec.paths.paths.iter()
         .filter(|(_, path_item)| {
-            path_item.description.is_some() || has_operation_with_description(path_item)
+            // Serialize path_item and inspect JSON
+            let json = serde_json::to_value(path_item).unwrap_or(serde_json::Value::Null);
+            if json.get("description").and_then(|v| v.as_str()).is_some() {
+                return true;
+            }
+            if let Some(obj) = json.as_object() {
+                for (method, op) in obj {
+                    if is_http_method(method) {
+                        if let Some(op_obj) = op.as_object() {
+                            if op_obj.get("description").is_some() || op_obj.get("summary").is_some() {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            false
         })
         .count()
 }
 
-fn has_operation_with_description(path_item: &utoipa::openapi::path::PathItem) -> bool {
-    let operations = [
-        &path_item.get, &path_item.post, &path_item.put, &path_item.delete,
-        &path_item.patch, &path_item.head, &path_item.options, &path_item.trace,
-    ];
-    
-    operations.iter().any(|op| {
-        if let Some(operation) = op {
-            operation.description.is_some() || operation.summary.is_some()
-        } else {
-            false
-        }
-    })
-}
+// Inspect PathItem via JSON to check for operation descriptions
+// helper logic for operation descriptions is inlined where needed
 
 fn count_total_operations(spec: &utoipa::openapi::OpenApi) -> usize {
     spec.paths.paths.iter()
         .map(|(_, path_item)| {
-            let operations = [
-                &path_item.get, &path_item.post, &path_item.put, &path_item.delete,
-                &path_item.patch, &path_item.head, &path_item.options, &path_item.trace,
-            ];
-            operations.iter().filter(|op| op.is_some()).count()
+            let json = serde_json::to_value(path_item).unwrap_or(serde_json::Value::Null);
+            if let Some(obj) = json.as_object() {
+                obj.keys().filter(|k| is_http_method(k)).count()
+            } else { 0 }
         })
         .sum()
 }

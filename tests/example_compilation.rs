@@ -91,10 +91,14 @@ mod example_compilation_tests {
             .expect("Serialized OpenAPI spec should be valid JSON");
         
         // Check for example values in schemas
-        if let Some(components) = &spec.components {
-            if let Some(schemas) = &components.schemas {
-                for (schema_name, schema) in schemas {
-                    validate_schema_examples(schema_name, schema);
+        // Inspect serialized spec JSON for schemas to avoid depending on utoipa internals
+        let spec_json = serde_json::to_value(&spec).expect("Should serialize spec");
+        if let Some(components) = spec_json.get("components") {
+            if let Some(schemas) = components.get("schemas") {
+                if let Some(schemas_obj) = schemas.as_object() {
+                    for (schema_name, schema_val) in schemas_obj {
+                        validate_schema_examples(schema_name, schema_val);
+                    }
                 }
             }
         }
@@ -296,7 +300,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-fn validate_schema_examples(schema_name: &str, _schema: &utoipa::openapi::RefOr<utoipa::openapi::schema::Schema>) {
+fn validate_schema_examples(schema_name: &str, _schema: &serde_json::Value) {
     // For now, just validate that schema names are reasonable
     assert!(!schema_name.is_empty(), "Schema name should not be empty");
     assert!(

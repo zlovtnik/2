@@ -36,6 +36,7 @@ fn validate_documentation_during_build() -> Result<(), Box<dyn std::error::Error
 
     // Emit rerun directive for the opt-in flag
     println!("cargo:rerun-if-env-changed=ENABLE_DOC_VALIDATION");
+    println!("cargo:rerun-if-env-changed=SKIP_DOC_VALIDATION");
 
     println!("cargo:rerun-if-changed=src/");
     println!("cargo:rerun-if-changed=tests/");
@@ -62,7 +63,8 @@ fn validate_documentation_during_build() -> Result<(), Box<dyn std::error::Error
 fn validate_rustdoc_generation() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:warning=Validating rustdoc generation...");
 
-    let mut command = Command::new("cargo");
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let mut command = Command::new(cargo);
     command
         .args(&["doc", "--no-deps", "--quiet"])
         .env("DOC_VALIDATION_IN_PROGRESS", "1")  // Prevent reentrancy
@@ -84,7 +86,9 @@ fn validate_rustdoc_generation() -> Result<(), Box<dyn std::error::Error>> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        eprintln!("Documentation generation failed: {}", stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        println!("cargo:warning=Documentation generation failed: {}", stderr);
+        println!("cargo:warning=rustdoc stdout: {}", stdout);
         return Err("Rustdoc generation failed".into());
     }
 

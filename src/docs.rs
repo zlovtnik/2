@@ -58,6 +58,7 @@ pub mod validation;
             
             // User schemas
             crate::core::user::User,
+            crate::api::user::UserWithRequesterId,
             crate::api::user::UserInfoWithStats,
             
             // Health schemas

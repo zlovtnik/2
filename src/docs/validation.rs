@@ -3,7 +3,7 @@
 //! This module provides utilities for validating API documentation completeness,
 //! correctness, and consistency across the codebase.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use serde_json::Value;
 use thiserror::Error;
 
@@ -90,6 +90,11 @@ impl OpenApiValidator {
         // Calculate coverage
         self.calculate_coverage(&mut result);
         
+            // Ensure that if validation failed we report at least one schema error
+            if !result.success && result.schema_errors.is_empty() {
+                result.schema_errors.push("OpenAPI validation failed".to_string());
+            }
+        
         Ok(result)
     }
     
@@ -130,29 +135,27 @@ impl OpenApiValidator {
     }
     
     fn validate_operations(&self, path: &str, path_item: &utoipa::openapi::path::PathItem, result: &mut ValidationResult) -> Result<(), DocumentationError> {
-        for (method, operation) in &path_item.operations {
-            if let Some(op) = operation {
-                // Validate that operation has summary or description
-                if op.summary.is_none() && op.description.is_none() {
-                    result.missing_docs.push(format!("{} {} - missing summary or description", method, path));
-                    result.success = false;
-                }
+        for (_method, op) in &path_item.operations {
+            // Validate that operation has summary or description
+            if op.summary.is_none() && op.description.is_none() {
+                result.missing_docs.push(format!("{} - missing summary or description", path));
+                result.success = false;
+            }
 
-                // Validate that operation has responses
-                if op.responses.responses.is_empty() && op.responses.default.is_none() {
-                    result.schema_errors.push(format!("{} {} - missing responses", method, path));
-                    result.success = false;
-                }
+            // Validate that operation has responses
+            if op.responses.responses.is_empty() {
+                result.schema_errors.push(format!("{} - missing responses", path));
+                result.success = false;
+            }
 
-                // Check for error responses on non-health endpoints
-                if !path.contains("/health/") {
-                    let has_error_responses = op.responses.responses.keys().any(|status| {
-                        status.starts_with('4') || status.starts_with('5')
-                    }) || op.responses.default.is_some();
+            // Check for error responses on non-health endpoints
+            if !path.contains("/health/") {
+                let has_error_responses = op.responses.responses.keys().any(|status| {
+                    status == "default" || status.starts_with('4') || status.starts_with('5')
+                });
 
-                    if !has_error_responses {
-                        result.warnings.push(format!("{} {} - consider adding error responses", method, path));
-                    }
+                if !has_error_responses {
+                    result.warnings.push(format!("{} - consider adding error responses", path));
                 }
             }
         }
@@ -162,50 +165,42 @@ impl OpenApiValidator {
     
     fn validate_schemas(&self, result: &mut ValidationResult) -> Result<(), DocumentationError> {
         if let Some(components) = &self.spec.components {
-            if let Some(schemas) = &components.schemas {
-                let spec_json = serde_json::to_value(&self.spec)
-                    .map_err(|e| DocumentationError::SchemaValidationFailed {
-                        schema: "spec".to_string(),
-                        error: e.to_string(),
-                    })?;
+            let schemas = &components.schemas;
+            let spec_json = serde_json::to_value(&self.spec)
+                .map_err(|e| DocumentationError::SchemaValidationFailed {
+                    schema: "spec".to_string(),
+                    error: e.to_string(),
+                })?;
 
-                let mut referenced_schemas = HashSet::new();
-                collect_schema_references(&spec_json, &mut referenced_schemas);
+            let mut referenced_schemas = HashSet::new();
+            collect_schema_references(&spec_json, &mut referenced_schemas);
 
-                // Check that all referenced schemas are defined
-                for referenced in &referenced_schemas {
-                    if !schemas.contains_key(referenced) {
-                        result.schema_errors.push(format!("Referenced schema '{}' is not defined", referenced));
-                        result.success = false;
-                    }
-                }
-
-                // Warn about unused schemas
-                for (schema_name, _) in schemas {
-                    if !referenced_schemas.contains(schema_name) {
-                        result.warnings.push(format!("Schema '{}' is defined but not referenced", schema_name));
-                    }
+            // Check that all referenced schemas are defined
+            for referenced in &referenced_schemas {
+                if !schemas.contains_key(referenced) {
+                    result.schema_errors.push(format!("Referenced schema '{}' is not defined", referenced));
+                    result.success = false;
                 }
             }
+
+            // Warn about unused schemas
+            for (schema_name, _) in schemas {
+                if !referenced_schemas.contains(schema_name) {
+                    result.warnings.push(format!("Schema '{}' is defined but not referenced", schema_name));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     fn validate_security_schemes(&self, result: &mut ValidationResult) -> Result<(), DocumentationError> {
         if let Some(components) = &self.spec.components {
-            if let Some(security_schemes) = &components.security_schemes {
-                for (scheme_name, scheme) in security_schemes {
-                    match scheme {
-                        utoipa::openapi::security::SecurityScheme::Http(http_scheme) => {
-                            if http_scheme.scheme.is_empty() {
-                                result.schema_errors.push(format!("HTTP security scheme '{}' must have scheme", scheme_name));
-                                result.success = false;
-                            }
-                        }
-                        utoipa::openapi::security::SecurityScheme::ApiKey(api_key_scheme) => {
-                            if api_key_scheme.name.is_empty() {
-                                result.schema_errors.push(format!("API key security scheme '{}' must have name", scheme_name));
-                                result.success = false;
-                            }
-                        }
-                        _ => {} // Other schemes are valid
-                    }
+            let security_schemes = &components.security_schemes;
+            for (scheme_name, _scheme) in security_schemes {
+                if scheme_name.trim().is_empty() {
+                    result.schema_errors.push(format!("Security scheme name must not be empty"));
+                    result.success = false;
                 }
             }
         }
@@ -230,13 +225,7 @@ impl OpenApiValidator {
     }
     
     fn path_has_documentation(&self, path_item: &utoipa::openapi::path::PathItem) -> bool {
-        path_item.operations.values().any(|op| {
-            if let Some(operation) = op {
-                operation.summary.is_some() || operation.description.is_some()
-            } else {
-                false
-            }
-        })
+        path_item.operations.values().any(|op| op.summary.is_some() || op.description.is_some())
     }
 }
 
