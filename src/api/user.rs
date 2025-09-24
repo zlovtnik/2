@@ -5,6 +5,7 @@ use crate::infrastructure::database::{Crud, PgCrud, UpdatableCrud};
 use sqlx::{PgPool, FromRow};
 use axum::http::StatusCode;
 use crate::middleware::auth::AuthenticatedUser;
+use crate::api::auth::ErrorResponse;
 use tracing::{info, warn, error, debug};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -21,6 +22,12 @@ pub struct UserInfoWithStats {
     pub last_login: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct UserWithRequesterId {
+    pub user: User,
+    pub requester_id: Uuid,
+}
+
 fn user_crud_box(pool: PgPool) -> Box<dyn Crud<User, Uuid> + Send + Sync> {
     Box::new(PgCrud::new(pool, "users"))
 }
@@ -30,11 +37,14 @@ fn user_crud_box(pool: PgPool) -> Box<dyn Crud<User, Uuid> + Send + Sync> {
     path = "/api/v1/users",
     request_body = User,
     responses(
-        (status = 201, description = "User created successfully", body = User),
-        (status = 409, description = "User with email already exists"),
-        (status = 500, description = "Database error")
+        (status = 201, description = "Kitchen staff member created successfully - Rate limit: 20 req/min with 3 burst allowance", body = User),
+        (status = 409, description = "Kitchen staff member with email already exists", body = ErrorResponse),
+        (status = 500, description = "Database error during staff creation", body = ErrorResponse)
     ),
-    tag = "users"
+    tag = "Kitchen Staff Management",
+    security(
+        ("bearer_auth" = [])
+    )
 )]
 pub async fn create_user(State(pool): State<PgPool>, Json(user): Json<User>) -> impl IntoResponse {
     info!(user_id = %user.id, email = %user.email, "Creating new user");
@@ -63,9 +73,18 @@ pub async fn create_user(State(pool): State<PgPool>, Json(user): Json<User>) -> 
             error!(user_id = %user.id, error = %e, "Failed to create user");
             if e.to_string().contains("duplicate key") {
                 warn!(email = %user.email, "Attempted to create user with duplicate email");
-                (StatusCode::CONFLICT, "User with this email already exists".to_string()).into_response()
+                // NOTE: coderabbitai warning — status mapping may be incorrect.
+                // The project's central ErrorResponse->HTTP status mapping can cause
+                // domain errors like "User already exists" or "User not found" to
+                // be returned with a 500 status. Consider returning an explicit
+                // HTTP status here (preferred), e.g.:
+                // (StatusCode::CONFLICT, Json(ErrorResponse::new("User already exists", Some("Email address is already registered".to_string())))).into_response()
+                // Or adjust the central mapping so named errors map to appropriate
+                // status codes. Similar locations that may need review: 111-116,
+                // 150-155, 188-193, 245-248, 292-297, 303-307.
+                ErrorResponse::new("User already exists", Some("Email address is already registered".to_string())).into_response()
             } else {
-                (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {}", e)).into_response()
+                ErrorResponse::new("Database error", Some(e.to_string())).into_response()
             }
         },
     }
@@ -75,15 +94,18 @@ pub async fn create_user(State(pool): State<PgPool>, Json(user): Json<User>) -> 
     get,
     path = "/api/v1/users/{id}",
     params(
-        ("id" = Uuid, Path, description = "User ID to retrieve")
+        ("id" = Uuid, Path, description = "Kitchen staff member ID to retrieve")
     ),
     responses(
-        (status = 200, description = "User found"),
-        (status = 404, description = "User not found"),
-        (status = 401, description = "Authentication required"),
-        (status = 500, description = "Database error")
+        (status = 200, description = "Kitchen staff member found - Rate limit: 50 req/min with 10 burst allowance", body = UserWithRequesterId),
+        (status = 404, description = "Kitchen staff member not found", body = ErrorResponse),
+        (status = 401, description = "Kitchen authentication required"),
+        (status = 500, description = "Database error", body = ErrorResponse)
     ),
-    tag = "users"
+    tag = "Kitchen Staff Management",
+    security(
+        ("bearer_auth" = [])
+    )
 )]
 pub async fn get_user(State(pool): State<PgPool>, Path(id): Path<Uuid>, AuthenticatedUser(user_id): AuthenticatedUser) -> impl IntoResponse {
     info!(requested_user_id = %id, authenticated_user_id = %user_id, "Getting user");
@@ -96,16 +118,17 @@ pub async fn get_user(State(pool): State<PgPool>, Path(id): Path<Uuid>, Authenti
     match crud.read(id).await {
         Ok(Some(user)) => {
             info!(user_id = %id, authenticated_user_id = %user_id, "User retrieved successfully");
-            debug!(user_email = %user.email, "User details retrieved");
-            (StatusCode::OK, Json((user, user_id))).into_response()
+            debug!(user_email = "[redacted]", "User details retrieved");
+            let resp = UserWithRequesterId { user, requester_id: user_id };
+            (StatusCode::OK, Json(resp)).into_response()
         },
         Ok(None) => {
             warn!(user_id = %id, authenticated_user_id = %user_id, "User not found");
-            (StatusCode::NOT_FOUND, "Not found").into_response()
+            ErrorResponse::new("User not found", None).into_response()
         },
         Err(e) => {
             error!(user_id = %id, authenticated_user_id = %user_id, error = %e, "Failed to retrieve user");
-            (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {}", e)).into_response()
+            ErrorResponse::new("Database error", Some(e.to_string())).into_response()
         },
     }
 }
@@ -114,17 +137,20 @@ pub async fn get_user(State(pool): State<PgPool>, Path(id): Path<Uuid>, Authenti
     delete,
     path = "/api/v1/users/{id}",
     params(
-        ("id" = Uuid, Path, description = "User ID to delete")
+        ("id" = Uuid, Path, description = "Kitchen staff member ID to remove")
     ),
     responses(
-        (status = 204, description = "User deleted successfully"),
-        (status = 404, description = "User not found"),
-        (status = 500, description = "Database error")
+        (status = 204, description = "Kitchen staff member removed successfully - Rate limit: 10 req/min with 2 burst allowance"),
+        (status = 404, description = "Kitchen staff member not found", body = ErrorResponse),
+        (status = 500, description = "Database error during staff removal", body = ErrorResponse)
     ),
-    tag = "users"
+    tag = "Kitchen Staff Management",
+    security(
+        ("bearer_auth" = [])
+    )
 )]
-pub async fn delete_user(State(pool): State<PgPool>, Path(id): Path<Uuid>) -> impl IntoResponse {
-    info!(user_id = %id, "Deleting user");
+pub async fn delete_user(AuthenticatedUser(user_id): AuthenticatedUser, State(pool): State<PgPool>, Path(id): Path<Uuid>) -> impl IntoResponse {
+    info!(user_id = %id, authenticated_user_id = %user_id, "Deleting user");
     debug!("Creating user CRUD instance for deletion");
     
     let crud = user_crud_box(pool);
@@ -137,11 +163,11 @@ pub async fn delete_user(State(pool): State<PgPool>, Path(id): Path<Uuid>) -> im
         },
         Ok(affected) => {
             warn!(user_id = %id, affected_rows = affected, "User not found for deletion");
-            (StatusCode::NOT_FOUND, "Not found").into_response()
+            ErrorResponse::new("User not found", None).into_response()
         },
         Err(e) => {
             error!(user_id = %id, error = %e, "Failed to delete user");
-            (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {}", e)).into_response()
+            ErrorResponse::new("Database error", Some(e.to_string())).into_response()
         },
     }
 }
@@ -150,12 +176,15 @@ pub async fn delete_user(State(pool): State<PgPool>, Path(id): Path<Uuid>) -> im
     get,
     path = "/api/v1/user/profile",
     responses(
-        (status = 200, description = "Current user profile", body = User),
-        (status = 404, description = "User not found"),
-        (status = 401, description = "Authentication required"),
-        (status = 500, description = "Database error")
+        (status = 200, description = "Current kitchen staff member profile - Rate limit: 60 req/min with 15 burst allowance", body = User),
+        (status = 404, description = "Kitchen staff member profile not found", body = ErrorResponse),
+        (status = 401, description = "Kitchen authentication required"),
+        (status = 500, description = "Database error", body = ErrorResponse)
     ),
-    tag = "users"
+    tag = "Kitchen Staff Management",
+    security(
+        ("bearer_auth" = [])
+    )
 )]
 pub async fn get_current_user(AuthenticatedUser(user_id): AuthenticatedUser, State(pool): State<PgPool>) -> impl IntoResponse {
     info!(user_id = %user_id, "Getting current user profile");
@@ -167,16 +196,16 @@ pub async fn get_current_user(AuthenticatedUser(user_id): AuthenticatedUser, Sta
     match crud.read(user_id).await {
         Ok(Some(user)) => {
             info!(user_id = %user_id, "Current user profile retrieved successfully");
-            debug!(user_email = %user.email, full_name = %user.full_name, "Current user details");
+            debug!(user_email = "[redacted]", full_name = "[redacted]", "Current user details");
             (StatusCode::OK, Json(user)).into_response()
         },
         Ok(None) => {
             warn!(user_id = %user_id, "Current user not found in database");
-            (StatusCode::NOT_FOUND, "User not found").into_response()
+            ErrorResponse::new("User not found", None).into_response()
         },
         Err(e) => {
             error!(user_id = %user_id, error = %e, "Failed to retrieve current user");
-            (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {}", e)).into_response()
+            ErrorResponse::new("Database error", Some(e.to_string())).into_response()
         },
     }
 }
@@ -185,12 +214,15 @@ pub async fn get_current_user(AuthenticatedUser(user_id): AuthenticatedUser, Sta
     get,
     path = "/api/v1/user/stats",
     responses(
-        (status = 200, description = "Current user statistics", body = UserInfoWithStats),
-        (status = 404, description = "User not found"),
-        (status = 401, description = "Authentication required"),
-        (status = 500, description = "Database error")
+        (status = 200, description = "Current kitchen staff member statistics and performance metrics - Rate limit: 30 req/min with 5 burst allowance", body = UserInfoWithStats),
+        (status = 404, description = "Kitchen staff member not found", body = ErrorResponse),
+        (status = 401, description = "Kitchen authentication required"),
+        (status = 500, description = "Database error", body = ErrorResponse)
     ),
-    tag = "users"
+    tag = "Kitchen Staff Management",
+    security(
+        ("bearer_auth" = [])
+    )
 )]
 pub async fn get_current_user_stats(
     AuthenticatedUser(user_id): AuthenticatedUser, 
@@ -226,9 +258,9 @@ pub async fn get_current_user_stats(
             error!(user_id = %user_id, error = %e, "Failed to retrieve user stats via procedure");
             if e.to_string().contains("not found") {
                 warn!(user_id = %user_id, "User not found in procedure call");
-                (StatusCode::NOT_FOUND, "User not found").into_response()
+                ErrorResponse::new("User not found", None).into_response()
             } else {
-                (StatusCode::INTERNAL_SERVER_ERROR, format!("Procedure error: {}", e)).into_response()
+                ErrorResponse::new("Database error", Some(e.to_string())).into_response()
             }
         },
     }
@@ -238,18 +270,21 @@ pub async fn get_current_user_stats(
     put,
     path = "/api/v1/users/{id}",
     params(
-        ("id" = Uuid, Path, description = "User ID to update")
+        ("id" = Uuid, Path, description = "Kitchen staff member ID to update")
     ),
     request_body = String,
     responses(
-        (status = 200, description = "User updated successfully", body = User),
-        (status = 404, description = "User not found"),
-        (status = 500, description = "Database error")
+        (status = 200, description = "Kitchen staff member updated successfully - Rate limit: 20 req/min with 3 burst allowance", body = User),
+        (status = 404, description = "Kitchen staff member not found", body = ErrorResponse),
+        (status = 500, description = "Database error during staff update", body = ErrorResponse)
     ),
-    tag = "users"
+    tag = "Kitchen Staff Management",
+    security(
+        ("bearer_auth" = [])
+    )
 )]
-pub async fn update_user(State(pool): State<PgPool>, Path(id): Path<Uuid>, Json(new_name): Json<String>) -> impl IntoResponse {
-    info!(user_id = %id, new_name = %new_name, "Updating user");
+pub async fn update_user(AuthenticatedUser(user_id): AuthenticatedUser, State(pool): State<PgPool>, Path(id): Path<Uuid>, Json(new_name): Json<String>) -> impl IntoResponse {
+    info!(user_id = %id, authenticated_user_id = %user_id, new_name = %new_name, "Updating user");
     debug!("Creating user CRUD instance for update");
     
     let crud: PgCrud<User> = PgCrud::new(pool, "users");
@@ -270,21 +305,21 @@ pub async fn update_user(State(pool): State<PgPool>, Path(id): Path<Uuid>, Json(
                 },
                 Ok(None) => {
                     warn!(user_id = %id, "User not found during update operation");
-                    (StatusCode::NOT_FOUND, "Not found").into_response()
+                    ErrorResponse::new("User not found", None).into_response()
                 },
                 Err(e) => {
                     error!(user_id = %id, error = %e, "Failed to update user");
-                    (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {}", e)).into_response()
+                    ErrorResponse::new("Database error", Some(e.to_string())).into_response()
                 },
             }
         }
         Ok(None) => {
             warn!(user_id = %id, "User not found for update");
-            (StatusCode::NOT_FOUND, "Not found").into_response()
+            ErrorResponse::new("User not found", None).into_response()
         },
         Err(e) => {
             error!(user_id = %id, error = %e, "Failed to check user existence before update");
-            (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {}", e)).into_response()
+            ErrorResponse::new("Database error", Some(e.to_string())).into_response()
         },
     }
 }

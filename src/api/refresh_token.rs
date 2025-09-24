@@ -4,6 +4,8 @@ use crate::core::refresh_token::RefreshToken;
 use crate::infrastructure::database::{Crud, PgCrud, UpdatableCrud};
 use sqlx::PgPool;
 use axum::http::StatusCode;
+use crate::api::auth::ErrorResponse;
+use crate::middleware::auth::AuthenticatedUser;
 use tracing::{info, warn, error, debug};
 
 fn refresh_token_crud_box(pool: PgPool) -> Box<dyn Crud<RefreshToken, Uuid> + Send + Sync> {
@@ -15,13 +17,16 @@ fn refresh_token_crud_box(pool: PgPool) -> Box<dyn Crud<RefreshToken, Uuid> + Se
     path = "/api/v1/refresh_tokens",
     request_body = RefreshToken,
     responses(
-        (status = 201, description = "Refresh token created successfully", body = RefreshToken),
-        (status = 409, description = "Refresh token with ID already exists"),
-        (status = 500, description = "Database error")
+        (status = 201, description = "Kitchen staff session token created successfully - Rate limit: 30 req/min with 5 burst allowance", body = RefreshToken),
+        (status = 409, description = "Session token with ID already exists", body = ErrorResponse),
+        (status = 500, description = "Database error during token creation", body = ErrorResponse)
     ),
-    tag = "tokens"
+    tag = "Session & Token Management",
+    security(
+        ("bearer_auth" = [])
+    )
 )]
-pub async fn create_refresh_token(State(pool): State<PgPool>, Json(token): Json<RefreshToken>) -> impl IntoResponse {
+pub async fn create_refresh_token(AuthenticatedUser(_user_id): AuthenticatedUser, State(pool): State<PgPool>, Json(token): Json<RefreshToken>) -> impl IntoResponse {
     info!(token_id = %token.id, user_id = %token.user_id, "Creating new refresh token");
     debug!(token_id = %token.id, expires_at = %token.expires_at, "Refresh token creation details");
     
@@ -46,9 +51,9 @@ pub async fn create_refresh_token(State(pool): State<PgPool>, Json(token): Json<
             error!(token_id = %token.id, user_id = %token.user_id, error = %e, "Failed to create refresh token");
             if e.to_string().contains("duplicate key") {
                 warn!(token_id = %token.id, "Attempted to create refresh token with duplicate ID");
-                (StatusCode::CONFLICT, "Refresh token with this ID already exists".to_string()).into_response()
+                (StatusCode::CONFLICT, ErrorResponse::new("Token already exists", Some("Refresh token with this ID already exists".to_string()))).into_response()
             } else {
-                (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {}", e)).into_response()
+                (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some(e.to_string()))).into_response()
             }
         },
     }
@@ -58,16 +63,19 @@ pub async fn create_refresh_token(State(pool): State<PgPool>, Json(token): Json<
     get,
     path = "/api/v1/refresh_tokens/{id}",
     params(
-        ("id" = Uuid, Path, description = "Refresh token ID to retrieve")
+        ("id" = Uuid, Path, description = "Kitchen staff session token ID to retrieve")
     ),
     responses(
-        (status = 200, description = "Refresh token found", body = RefreshToken),
-        (status = 404, description = "Refresh token not found"),
-        (status = 500, description = "Database error")
+        (status = 200, description = "Kitchen staff session token found - Rate limit: 60 req/min with 10 burst allowance", body = RefreshToken),
+        (status = 404, description = "Session token not found or expired", body = ErrorResponse),
+        (status = 500, description = "Database error during token retrieval", body = ErrorResponse)
     ),
-    tag = "tokens"
+    tag = "Session & Token Management",
+    security(
+        ("bearer_auth" = [])
+    )
 )]
-pub async fn get_refresh_token(State(pool): State<PgPool>, Path(id): Path<Uuid>) -> impl IntoResponse {
+pub async fn get_refresh_token(AuthenticatedUser(_user_id): AuthenticatedUser, State(pool): State<PgPool>, Path(id): Path<Uuid>) -> impl IntoResponse {
     info!(token_id = %id, "Getting refresh token");
     debug!("Creating refresh token CRUD instance");
     
@@ -82,11 +90,11 @@ pub async fn get_refresh_token(State(pool): State<PgPool>, Path(id): Path<Uuid>)
         },
         Ok(None) => {
             warn!(token_id = %id, "Refresh token not found");
-            (StatusCode::NOT_FOUND, "Not found").into_response()
+            (StatusCode::NOT_FOUND, ErrorResponse::new("Token not found", None)).into_response()
         },
         Err(e) => {
             error!(token_id = %id, error = %e, "Failed to retrieve refresh token");
-            (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {}", e)).into_response()
+            (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some(e.to_string()))).into_response()
         },
     }
 }
@@ -95,16 +103,19 @@ pub async fn get_refresh_token(State(pool): State<PgPool>, Path(id): Path<Uuid>)
     delete,
     path = "/api/v1/refresh_tokens/{id}",
     params(
-        ("id" = Uuid, Path, description = "Refresh token ID to delete")
+        ("id" = Uuid, Path, description = "Kitchen staff session token ID to revoke")
     ),
     responses(
-        (status = 204, description = "Refresh token deleted successfully"),
-        (status = 404, description = "Refresh token not found"),
-        (status = 500, description = "Database error")
+        (status = 204, description = "Kitchen staff session token revoked successfully - Rate limit: 20 req/min with 3 burst allowance"),
+        (status = 404, description = "Session token not found", body = ErrorResponse),
+        (status = 500, description = "Database error during token revocation", body = ErrorResponse)
     ),
-    tag = "tokens"
+    tag = "Session & Token Management",
+    security(
+        ("bearer_auth" = [])
+    )
 )]
-pub async fn delete_refresh_token(State(pool): State<PgPool>, Path(id): Path<Uuid>) -> impl IntoResponse {
+pub async fn delete_refresh_token(AuthenticatedUser(_user_id): AuthenticatedUser, State(pool): State<PgPool>, Path(id): Path<Uuid>) -> impl IntoResponse {
     info!(token_id = %id, "Deleting refresh token");
     debug!("Creating refresh token CRUD instance for deletion");
     
@@ -118,11 +129,11 @@ pub async fn delete_refresh_token(State(pool): State<PgPool>, Path(id): Path<Uui
         },
         Ok(affected) => {
             warn!(token_id = %id, affected_rows = affected, "Refresh token not found for deletion");
-            (StatusCode::NOT_FOUND, "Not found").into_response()
+            (StatusCode::NOT_FOUND, ErrorResponse::new("Token not found", None)).into_response()
         },
         Err(e) => {
             error!(token_id = %id, error = %e, "Failed to delete refresh token");
-            (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {}", e)).into_response()
+            (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some(e.to_string()))).into_response()
         },
     }
 }
@@ -132,17 +143,20 @@ pub async fn delete_refresh_token(State(pool): State<PgPool>, Path(id): Path<Uui
     put,
     path = "/api/v1/refresh_tokens/{id}",
     params(
-        ("id" = Uuid, Path, description = "Refresh token ID to update")
+        ("id" = Uuid, Path, description = "Kitchen staff session token ID to update")
     ),
     request_body = String,
     responses(
-        (status = 200, description = "Refresh token updated successfully", body = RefreshToken),
-        (status = 404, description = "Refresh token not found"),
-        (status = 500, description = "Database error")
+        (status = 200, description = "Kitchen staff session token updated successfully - Rate limit: 30 req/min with 5 burst allowance", body = RefreshToken),
+        (status = 404, description = "Session token not found", body = ErrorResponse),
+        (status = 500, description = "Database error during token update", body = ErrorResponse)
     ),
-    tag = "tokens"
+    tag = "Session & Token Management",
+    security(
+        ("bearer_auth" = [])
+    )
 )]
-pub async fn update_refresh_token(State(pool): State<PgPool>, Path(id): Path<Uuid>, Json(new_token): Json<String>) -> impl IntoResponse {
+pub async fn update_refresh_token(AuthenticatedUser(_user_id): AuthenticatedUser, State(pool): State<PgPool>, Path(id): Path<Uuid>, Json(new_token): Json<String>) -> impl IntoResponse {
     info!(token_id = %id, "Updating refresh token");
     debug!("Creating refresh token CRUD instance for update");
     
@@ -167,21 +181,21 @@ pub async fn update_refresh_token(State(pool): State<PgPool>, Path(id): Path<Uui
                 },
                 Ok(None) => {
                     warn!(token_id = %id, "Refresh token not found during update operation");
-                    (StatusCode::NOT_FOUND, "Not found").into_response()
+                    (StatusCode::NOT_FOUND, ErrorResponse::new("Token not found", None)).into_response()
                 },
                 Err(e) => {
                     error!(token_id = %id, error = %e, "Failed to update refresh token");
-                    (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {}", e)).into_response()
+                    (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some(e.to_string()))).into_response()
                 },
             }
         }
         Ok(None) => {
             warn!(token_id = %id, "Refresh token not found for update");
-            (StatusCode::NOT_FOUND, "Not found").into_response()
+            (StatusCode::NOT_FOUND, ErrorResponse::new("Token not found", None)).into_response()
         },
         Err(e) => {
             error!(token_id = %id, error = %e, "Failed to check refresh token existence before update");
-            (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {}", e)).into_response()
+            (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some(e.to_string()))).into_response()
         },
     }
 }

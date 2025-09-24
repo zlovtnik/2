@@ -158,9 +158,9 @@ pub struct HealthStatus {
     get,
     path = "/health/live",
     responses(
-        (status = 200, description = "Application is alive")
+        (status = 200, description = "Kitchen management system is alive and operational - Rate limit: 300 req/min with 50 burst allowance")
     ),
-    tag = "health"
+    tag = "System Health & Monitoring"
 )]
 pub async fn live() -> impl IntoResponse {
     (axum::http::StatusCode::OK, "live")
@@ -258,10 +258,10 @@ pub async fn live() -> impl IntoResponse {
     get,
     path = "/health/ready",
     responses(
-        (status = 200, description = "Application is ready", body = HealthStatus),
-        (status = 500, description = "Application is not ready", body = HealthStatus)
+        (status = 200, description = "Kitchen management system is ready to serve traffic - Rate limit: 300 req/min with 50 burst allowance", body = HealthStatus),
+        (status = 500, description = "Kitchen management system is not ready - dependencies unavailable", body = HealthStatus)
     ),
-    tag = "health"
+    tag = "System Health & Monitoring"
 )]
 pub async fn ready(State(pool): State<PgPool>) -> impl IntoResponse {
     let (db_status, db_error) = match sqlx::query_scalar::<_, i32>("SELECT 1").fetch_one(&pool).await {

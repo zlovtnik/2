@@ -72,7 +72,7 @@
 //! ```
 
 use axum::{Json, response::IntoResponse};
-use crate::core::auth::{RegisterRequest, LoginRequest, hash_password, verify_password, create_jwt, use_verify_jwt_for_warning};
+use crate::core::auth::{RegisterRequest, LoginRequest, hash_password, verify_password, create_jwt, verify_jwt};
 use crate::middleware::validation::ValidationErrorResponse;
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -134,7 +134,7 @@ impl ErrorResponse {
     ///     Some("Email already exists in the system".to_string())
     /// );
     /// ```
-    fn new(error: impl Into<String>, details: Option<String>) -> Self {
+    pub fn new(error: impl Into<String>, details: Option<String>) -> Self {
         Self {
             error: error.into(),
             details,
@@ -162,8 +162,15 @@ impl ErrorResponse {
 impl IntoResponse for ErrorResponse {
     fn into_response(self) -> axum::response::Response {
         let status = match self.error.as_str() {
+            // Client-side validation/registration problems
             "Registration failed" => axum::http::StatusCode::BAD_REQUEST,
+            // Authentication failures
             "Invalid credentials" => axum::http::StatusCode::UNAUTHORIZED,
+            // Resource not found
+            "User not found" | "Token not found" => axum::http::StatusCode::NOT_FOUND,
+            // Conflict / already exists
+            "User already exists" | "Token already exists" => axum::http::StatusCode::CONFLICT,
+            // Fallback to internal server error for other cases
             _ => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
         };
         
@@ -344,10 +351,11 @@ pub struct TokenResponse {
     path = "/api/v1/auth/register",
     request_body = RegisterRequest,
     responses(
-        (status = 200, description = "User registered", body = TokenResponse),
-        (status = 400, description = "Validation failed", body = ValidationErrorResponse),
-        (status = 500, description = "Registration failed")
-    )
+        (status = 200, description = "Kitchen staff member registered successfully - Rate limit: 10 req/min with 2 burst allowance", body = TokenResponse),
+        (status = 400, description = "Registration validation failed", body = ValidationErrorResponse),
+        (status = 500, description = "Registration failed due to server error", body = ErrorResponse)
+    ),
+    tag = "Kitchen Staff Authentication"
 )]
 pub async fn register(State(pool): State<PgPool>, Json(mut payload): Json<RegisterRequest>) -> Result<Json<TokenResponse>, AuthError> {
     info!(email = %payload.email, "Registration attempt");
@@ -507,10 +515,12 @@ pub async fn register(State(pool): State<PgPool>, Json(mut payload): Json<Regist
     path = "/api/v1/auth/login",
     request_body = LoginRequest,
     responses(
-        (status = 200, description = "User logged in", body = TokenResponse),
-        (status = 400, description = "Validation failed", body = ValidationErrorResponse),
-        (status = 401, description = "Invalid credentials")
-    )
+        (status = 200, description = "Kitchen staff member authenticated successfully - Rate limit: 10 req/min with 2 burst allowance", body = TokenResponse),
+        (status = 400, description = "Login validation failed", body = ValidationErrorResponse),
+        (status = 401, description = "Invalid kitchen staff credentials", body = ErrorResponse),
+        (status = 500, description = "Login failed due to server error", body = ErrorResponse)
+    ),
+    tag = "Kitchen Staff Authentication"
 )]
 pub async fn login(State(pool): State<PgPool>, Json(mut payload): Json<LoginRequest>) -> Result<Json<TokenResponse>, AuthError> {
     info!(email = %payload.email, "Login attempt");
@@ -607,14 +617,44 @@ pub async fn login(State(pool): State<PgPool>, Json(mut payload): Json<LoginRequ
     post,
     path = "/api/v1/auth/refresh",
     responses(
-        (status = 200, description = "Token refreshed")
+        (status = 200, description = "Kitchen staff authentication token refreshed successfully - Rate limit: 20 req/min with 5 burst allowance")
+    ),
+    tag = "Kitchen Staff Authentication",
+    security(
+        ("bearer_auth" = [])
     )
 )]
-pub async fn refresh() -> impl IntoResponse {
+pub async fn refresh(req: axum::http::Request<axum::body::Body>) -> Result<Json<TokenResponse>, AuthError> {
     info!("Refresh token endpoint called");
-    // Use verify_jwt to avoid unused warning
-    let _ = use_verify_jwt_for_warning("dummy_token");
-    (axum::http::StatusCode::OK, "refresh")
+
+    // Extract Authorization header
+    let headers = req.headers();
+    let token = match headers.get(axum::http::header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer ")) {
+            Some(t) => t,
+            None => {
+                warn!("Missing or invalid Authorization header");
+                return Err(AuthError::Standard(ErrorResponse::new("Invalid credentials", Some("Missing Authorization header".to_string()))));
+            }
+        };
+
+    // Verify the incoming token
+    match verify_jwt(token) {
+        Ok(user_id) => {
+            // Create a new token for the same user
+            let new_token = create_jwt(user_id).map_err(|e| {
+                warn!(error = %e, "Failed to create refreshed JWT");
+                AuthError::Standard(ErrorResponse::new("Token refresh failed", Some("Failed to generate refreshed token".to_string())))
+            })?;
+
+            Ok(Json(TokenResponse { token: new_token }))
+        }
+        Err(e) => {
+            warn!(error = %e, "Invalid or expired token provided for refresh");
+            Err(AuthError::Standard(ErrorResponse::new("Invalid credentials", Some("Invalid or expired token".to_string()))))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -641,15 +681,8 @@ mod tests {
     }
 
     async fn app() -> Router {
-        let pool = dummy_pool().await;
-        let stateful_app = Router::new()
-            .route("/register", post(register))
-            .route("/login", post(login))
-            .route("/refresh", post(refresh))
-            .with_state(pool);
-        
-        // Create a stateless router by merging the stateful one
-        Router::new().merge(stateful_app)
+        // Only expose the refresh endpoint for this test to avoid building a DB pool
+        Router::new().route("/refresh", post(refresh))
     }
 
     #[tokio::test]
@@ -705,11 +738,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_refresh() {
+        // Setup env and create a valid token
+        std::env::set_var("APP_AUTH__JWT_SECRET", "test_secret_key_for_testing_jwt_refresh");
+        let user_id = uuid::Uuid::new_v4();
+        let token = crate::core::auth::create_jwt(user_id).expect("create_jwt should succeed");
+
         let req = Request::builder()
             .method("POST")
             .uri("/refresh")
+            .header("Authorization", format!("Bearer {}", token))
             .body(Body::empty())
             .unwrap();
+
         let app = app().await.into_service();
         let res = app.oneshot(req).await.unwrap();
         assert_eq!(res.status(), StatusCode::OK);

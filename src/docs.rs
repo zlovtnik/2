@@ -1,5 +1,7 @@
 use utoipa::OpenApi;
 
+pub mod validation;
+
 /// Main API documentation
 /// 
 /// This struct is used to generate the OpenAPI documentation for the entire API.
@@ -8,7 +10,7 @@ use utoipa::OpenApi;
     info(
         title = "Kitchen Management API",
         version = "1.0.0",
-        description = "Comprehensive restaurant kitchen management system API providing authentication, user management, health monitoring, and token management capabilities.",
+        description = "Comprehensive restaurant kitchen management system API providing authentication, user management, health monitoring, and token management capabilities. This API supports kitchen staff workflows including order processing, inventory management, and real-time kitchen operations coordination.",
         contact(
             name = "Kitchen Management Team",
             email = "api@kitchenmanagement.com"
@@ -19,8 +21,8 @@ use utoipa::OpenApi;
         )
     ),
     servers(
-        (url = "/api/v1", description = "Production API"),
-        (url = "http://localhost:3000/api/v1", description = "Development API")
+        (url = "/api/v1", description = "Production API - Kitchen Management System"),
+        (url = "http://localhost:3000/api/v1", description = "Development API - Local Kitchen Environment")
     ),
     paths(
         // Authentication endpoints
@@ -56,6 +58,7 @@ use utoipa::OpenApi;
             
             // User schemas
             crate::core::user::User,
+            crate::api::user::UserWithRequesterId,
             crate::api::user::UserInfoWithStats,
             
             // Health schemas
@@ -69,14 +72,42 @@ use utoipa::OpenApi;
         )
     ),
     tags(
-        (name = "authentication", description = "User authentication and authorization endpoints including registration, login, and token refresh"),
-        (name = "users", description = "User management operations including profile management, statistics, and CRUD operations"),
-        (name = "health", description = "System health monitoring endpoints for liveness and readiness probes"),
-        (name = "tokens", description = "Refresh token management for session handling and token lifecycle management"),
+        (
+            name = "Kitchen Staff Authentication", 
+            description = "Authentication endpoints for kitchen staff including chefs, line cooks, and kitchen managers. Supports secure registration, login, and session management for kitchen operations.",
+            external_docs(
+                url = "/docs/authentication",
+                description = "Kitchen staff authentication guide"
+            )
+        ),
+        (
+            name = "Kitchen Staff Management", 
+            description = "User management operations for kitchen personnel including profile management, staff statistics, and role-based access control. Essential for managing kitchen team workflows and permissions.",
+            external_docs(
+                url = "/docs/staff-management", 
+                description = "Kitchen staff management workflows"
+            )
+        ),
+        (
+            name = "System Health & Monitoring", 
+            description = "Health monitoring endpoints for kitchen management system reliability. Used by load balancers and monitoring systems to ensure continuous kitchen operations during peak service hours.",
+            external_docs(
+                url = "/docs/monitoring",
+                description = "System monitoring and alerting guide"
+            )
+        ),
+        (
+            name = "Session & Token Management", 
+            description = "Refresh token management for extended kitchen shifts and session handling. Supports long-running kitchen operations without authentication interruptions.",
+            external_docs(
+                url = "/docs/session-management",
+                description = "Session management for kitchen workflows"
+            )
+        ),
     ),
     external_docs(
         url = "/docs",
-        description = "Additional API documentation and implementation guides"
+        description = "Complete kitchen management API documentation including workflow guides, integration examples, and best practices for restaurant operations"
     )
 )]
 pub struct ApiDoc; 
