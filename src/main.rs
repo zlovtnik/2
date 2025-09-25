@@ -56,7 +56,7 @@ async fn main() {
         };
         
         let grpc_server_task = async {
-            if let Err(e) = grpc_server(grpc_pool, grpc_addr).await {
+            if let Err(e) = grpc_server(grpc_pool, grpc_addr, &config).await {
                 tracing::error!("gRPC server error: {}", e);
                 // Check if it's a port binding issue
                 if e.to_string().contains("Address already in use") || e.to_string().contains("AddrInUse") {

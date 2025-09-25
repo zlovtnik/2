@@ -54,3 +54,8 @@ tokio-test = "0.4"
 tempfile = "3.8"
 serial_test = "3.0"
 regex = "1.10"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "grpc_connection_pool_benchmark"
+harness = false

@@ -1,5 +1,20 @@
 use std::process::Command;
 
+/// RAII guard for DOC_VALIDATION_IN_PROGRESS environment variable
+struct DocValidationGuard;
+
+impl DocValidationGuard {
+    fn new() -> Self {
+        std::env::set_var("DOC_VALIDATION_IN_PROGRESS", "1");
+        Self
+    }
+}
+
+impl Drop for DocValidationGuard {
+    fn drop(&mut self) {
+        std::env::remove_var("DOC_VALIDATION_IN_PROGRESS");
+    }
+}
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Existing protobuf compilation
     let out_dir = std::env::var("OUT_DIR").unwrap();
@@ -41,20 +56,17 @@ fn validate_documentation_during_build() -> Result<(), Box<dyn std::error::Error
     println!("cargo:rerun-if-changed=src/");
     println!("cargo:rerun-if-changed=tests/");
 
-    // Set reentrancy guard
-    std::env::set_var("DOC_VALIDATION_IN_PROGRESS", "1");
+    // Create RAII guard that sets the environment variable and ensures cleanup
+    let _guard = DocValidationGuard::new();
 
     // Validate that documentation can be generated
     validate_rustdoc_generation()?;
 
-    // Validate OpenAPI spec generation
-    validate_openapi_generation()?;
+    // Placeholder OpenAPI validation (currently just a stub)
+    placeholder_openapi_validation()?;
 
     // Run documentation tests if available
     run_documentation_tests()?;
-
-    // Clean up reentrancy guard
-    std::env::remove_var("DOC_VALIDATION_IN_PROGRESS");
 
     Ok(())
 }
@@ -95,13 +107,19 @@ fn validate_rustdoc_generation() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Validate that OpenAPI specification can be generated
-fn validate_openapi_generation() -> Result<(), Box<dyn std::error::Error>> {
-    println!("cargo:warning=Validating OpenAPI specification generation...");
-    
+/// Placeholder for OpenAPI specification validation - currently just a stub
+/// TODO: Implement actual OpenAPI generation/compilation validation
+/// This should validate that OpenAPI specs can be generated from the codebase
+/// and that they compile without errors. Consider using tools like:
+/// - openapi-generator for validation
+/// - custom validation logic to check spec completeness
+/// - integration with CI/CD to ensure specs are up-to-date
+fn placeholder_openapi_validation() -> Result<(), Box<dyn std::error::Error>> {
+    println!("cargo:warning=OpenAPI validation is currently a placeholder - no real validation performed...");
+
     // This will be validated by the compilation of the docs module
     // If the OpenAPI spec has issues, the compilation will fail
-    
+
     Ok(())
 }
 

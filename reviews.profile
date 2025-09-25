@@ -8,11 +8,11 @@ assertive: true
 # For example:
 # max_concurrent_reviews: 3
 exclude_paths:
-	- "**/test/**"
-	- "**/vendor/**"
-	- "**/target/**"
-	- "**/node_modules/**"
-	- "**/dist/**"
+  - "**/test/**"
+  - "**/vendor/**"
+  - "**/target/**"
+  - "**/node_modules/**"
+  - "**/dist/**"
 
 # You can also configure specific rules or override default behaviors
 # rules:

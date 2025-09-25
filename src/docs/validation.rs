@@ -201,11 +201,17 @@ impl OpenApiValidator {
     fn validate_security_schemes(&self, result: &mut ValidationResult) -> Result<(), DocumentationError> {
         if let Some(components) = &self.spec.components {
             let security_schemes = &components.security_schemes;
-            for (scheme_name, _scheme) in security_schemes {
-                if scheme_name.trim().is_empty() {
-                    result.schema_errors.push(format!("Security scheme name must not be empty"));
-                    result.success = false;
+            for (scheme_name, scheme) in security_schemes {
+                // Validate scheme description if present
+                if let Some(description) = &scheme.description {
+                    if description.trim().is_empty() {
+                        result.schema_errors.push(format!("Security scheme '{}' has empty description", scheme_name));
+                        result.success = false;
+                    }
                 }
+                
+                // Additional validation could be added here for scheme-specific fields
+                // based on the scheme type (bearer, apiKey, oauth2, etc.)
             }
         }
 
@@ -345,15 +351,49 @@ impl ExampleValidator {
         Ok(())
     }
     
-    async fn validate_user_examples(&self, _result: &mut ValidationResult) -> Result<(), DocumentationError> {
+    async fn validate_user_examples(&self, result: &mut ValidationResult) -> Result<(), DocumentationError> {
+        use crate::core::user::User;
+        use uuid::Uuid;
+        use chrono::Utc;
+        
         // Validate user management example structures
-        let _user_example = serde_json::json!({
+        let user_example = serde_json::json!({
+            "id": Uuid::new_v4(),
             "email": "kitchen.manager@restaurant.com",
+            "password_hash": "hashed_password_example",
             "full_name": "Kitchen Manager",
-            "role": "manager"
+            "preferences": null,
+            "created_at": Utc::now(),
+            "updated_at": Utc::now()
         });
         
-        // Add validation logic here
+        // Validate the example can be deserialized into User struct
+        match serde_json::from_value::<User>(user_example.clone()) {
+            Ok(user) => {
+                // Validate email format
+                if !User::is_valid_email(&user.email) {
+                    result.schema_errors.push("User example has invalid email format".to_string());
+                    result.success = false;
+                }
+                
+                // Validate full_name is not empty
+                if user.full_name.trim().is_empty() {
+                    result.schema_errors.push("User example has empty full_name".to_string());
+                    result.success = false;
+                }
+                
+                // Validate password_hash is not empty
+                if user.password_hash.trim().is_empty() {
+                    result.schema_errors.push("User example has empty password_hash".to_string());
+                    result.success = false;
+                }
+            },
+            Err(e) => {
+                result.schema_errors.push(format!("User example failed deserialization: {}", e));
+                result.success = false;
+            }
+        }
+        
         Ok(())
     }
     
@@ -376,8 +416,9 @@ mod tests {
         let validator = OpenApiValidator::new(spec);
         let result = validator.validate().expect("Validation should succeed");
         
-        // Basic validation should pass
-        assert!(result.success || !result.schema_errors.is_empty());
+        // Basic validation should pass for a valid API spec
+        assert!(result.success);
+        assert!(result.schema_errors.is_empty());
     }
 
     #[test]

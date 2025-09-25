@@ -22,9 +22,33 @@ pub struct UserInfoWithStats {
     pub last_login: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+/// Sanitized user representation for API responses (excludes sensitive fields like password_hash)
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct PublicUser {
+    pub id: Uuid,
+    pub email: String,
+    pub full_name: String,
+    pub preferences: Option<serde_json::Value>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl From<&User> for PublicUser {
+    fn from(user: &User) -> Self {
+        Self {
+            id: user.id,
+            email: user.email.clone(),
+            full_name: user.full_name.clone(),
+            preferences: user.preferences.clone(),
+            created_at: user.created_at,
+            updated_at: user.updated_at,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct UserWithRequesterId {
-    pub user: User,
+    pub user: PublicUser,
     pub requester_id: Uuid,
 }
 
@@ -73,18 +97,9 @@ pub async fn create_user(State(pool): State<PgPool>, Json(user): Json<User>) -> 
             error!(user_id = %user.id, error = %e, "Failed to create user");
             if e.to_string().contains("duplicate key") {
                 warn!(email = %user.email, "Attempted to create user with duplicate email");
-                // NOTE: coderabbitai warning — status mapping may be incorrect.
-                // The project's central ErrorResponse->HTTP status mapping can cause
-                // domain errors like "User already exists" or "User not found" to
-                // be returned with a 500 status. Consider returning an explicit
-                // HTTP status here (preferred), e.g.:
-                // (StatusCode::CONFLICT, Json(ErrorResponse::new("User already exists", Some("Email address is already registered".to_string())))).into_response()
-                // Or adjust the central mapping so named errors map to appropriate
-                // status codes. Similar locations that may need review: 111-116,
-                // 150-155, 188-193, 245-248, 292-297, 303-307.
                 (StatusCode::CONFLICT, Json(ErrorResponse::new("User already exists", Some("Email address is already registered".to_string())))).into_response()
             } else {
-                ErrorResponse::new("Database error", Some(e.to_string())).into_response()
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse::new("Database error", Some(e.to_string())))).into_response()
             }
         },
     }
@@ -119,7 +134,8 @@ pub async fn get_user(State(pool): State<PgPool>, Path(id): Path<Uuid>, Authenti
         Ok(Some(user)) => {
             info!(user_id = %id, authenticated_user_id = %user_id, "User retrieved successfully");
             debug!(user_email = "[redacted]", "User details retrieved");
-            let resp = UserWithRequesterId { user, requester_id: user_id };
+            let public_user = PublicUser::from(&user);
+            let resp = UserWithRequesterId { user: public_user, requester_id: user_id };
             (StatusCode::OK, Json(resp)).into_response()
         },
         Ok(None) => {
@@ -183,7 +199,7 @@ pub async fn delete_user(AuthenticatedUser(user_id): AuthenticatedUser, State(po
     get,
     path = "/api/v1/user/profile",
     responses(
-        (status = 200, description = "Current kitchen staff member profile - Rate limit: 60 req/min with 15 burst allowance", body = User),
+        (status = 200, description = "Current kitchen staff member profile - Rate limit: 60 req/min with 15 burst allowance", body = PublicUser),
         (status = 404, description = "Kitchen staff member profile not found", body = ErrorResponse),
         (status = 401, description = "Kitchen authentication required"),
         (status = 500, description = "Database error", body = ErrorResponse)
@@ -204,7 +220,8 @@ pub async fn get_current_user(AuthenticatedUser(user_id): AuthenticatedUser, Sta
         Ok(Some(user)) => {
             info!(user_id = %user_id, "Current user profile retrieved successfully");
             debug!(user_email = "[redacted]", full_name = "[redacted]", "Current user details");
-            (StatusCode::OK, Json(user)).into_response()
+            let public_user = PublicUser::from(&user);
+            (StatusCode::OK, Json(public_user)).into_response()
         },
         Ok(None) => {
             warn!(user_id = %user_id, "Current user not found in database");
@@ -265,9 +282,9 @@ pub async fn get_current_user_stats(
             error!(user_id = %user_id, error = %e, "Failed to retrieve user stats via procedure");
             if e.to_string().contains("not found") {
                 warn!(user_id = %user_id, "User not found in procedure call");
-                ErrorResponse::new("User not found", None).into_response()
+                (StatusCode::NOT_FOUND, Json(ErrorResponse::new("User not found", None))).into_response()
             } else {
-                ErrorResponse::new("Database error", Some(e.to_string())).into_response()
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse::new("Database error", Some(e.to_string())))).into_response()
             }
         },
     }
@@ -281,7 +298,7 @@ pub async fn get_current_user_stats(
     ),
     request_body = String,
     responses(
-        (status = 200, description = "Kitchen staff member updated successfully - Rate limit: 20 req/min with 3 burst allowance", body = User),
+        (status = 200, description = "Kitchen staff member updated successfully - Rate limit: 20 req/min with 3 burst allowance", body = PublicUser),
         (status = 404, description = "Kitchen staff member not found", body = ErrorResponse),
         (status = 500, description = "Database error during staff update", body = ErrorResponse)
     ),
@@ -316,7 +333,8 @@ pub async fn update_user(AuthenticatedUser(user_id): AuthenticatedUser, State(po
             match UpdatableCrud::update(&crud, id, update_fn).await {
                 Ok(Some(updated)) => {
                     info!(user_id = %id, updated_name = %updated.full_name, "User updated successfully");
-                    (StatusCode::OK, Json(updated)).into_response()
+                    let public_user = PublicUser::from(&updated);
+                    (StatusCode::OK, Json(public_user)).into_response()
                 },
                 Ok(None) => {
                     warn!(user_id = %id, "User not found during update operation");
