@@ -2729,6 +2729,7 @@ dependencies = [
  "hyper 1.6.0",
  "jsonwebtoken",
  "prost",
+ "prost-types",
  "rand_core 0.6.4",
  "redis",
  "regex",

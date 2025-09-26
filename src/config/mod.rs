@@ -2,6 +2,7 @@ use tracing::{info, debug};
 
 pub struct Config {
     pub server_port: u16,
+    pub grpc_upstream_endpoint: String,
     pub grpc_connection_pool_size: usize,
     pub grpc_connection_timeout_secs: u64,
     pub grpc_health_check_interval_secs: u64,
@@ -33,8 +34,13 @@ pub fn load() -> Config {
         .and_then(|p| p.parse::<u64>().ok())
         .unwrap_or(60); // Default to 60 seconds
     
+    // Load gRPC upstream endpoint from environment variable or use default
+    let grpc_upstream_endpoint = std::env::var("GRPC_UPSTREAM_ENDPOINT")
+        .unwrap_or_else(|_| format!("http://127.0.0.1:{}", server_port.saturating_add(1)));
+    
     let config = Config { 
         server_port,
+        grpc_upstream_endpoint,
         grpc_connection_pool_size,
         grpc_connection_timeout_secs,
         grpc_health_check_interval_secs,
@@ -42,6 +48,7 @@ pub fn load() -> Config {
     
     info!(
         server_port = config.server_port,
+        grpc_upstream_endpoint = config.grpc_upstream_endpoint,
         grpc_connection_pool_size = config.grpc_connection_pool_size,
         grpc_connection_timeout_secs = config.grpc_connection_timeout_secs,
         grpc_health_check_interval_secs = config.grpc_health_check_interval_secs,

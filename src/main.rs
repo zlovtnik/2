@@ -35,7 +35,7 @@ async fn main() {
     if enable_grpc {
         tracing::info!("gRPC server enabled");
         let grpc_pool = pool.clone();
-        let grpc_addr = SocketAddr::from(([0, 0, 0, 0], config.server_port + 1));
+        let grpc_addr = SocketAddr::from(([0, 0, 0, 0], config.server_port.saturating_add(1)));
         
         // Start both servers concurrently
         let rest_server = async {

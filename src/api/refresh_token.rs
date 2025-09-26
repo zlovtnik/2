@@ -18,6 +18,7 @@ fn refresh_token_crud_box(pool: PgPool) -> Box<dyn Crud<RefreshToken, Uuid> + Se
     request_body = RefreshToken,
     responses(
         (status = 201, description = "Kitchen staff session token created successfully - Rate limit: 30 req/min with 5 burst allowance", body = RefreshToken),
+        (status = 403, description = "Forbidden — cannot create token for another user", body = ErrorResponse),
         (status = 409, description = "Session token with ID already exists", body = ErrorResponse),
         (status = 500, description = "Database error during token creation", body = ErrorResponse)
     ),
@@ -72,6 +73,7 @@ pub async fn create_refresh_token(AuthenticatedUser(user_id): AuthenticatedUser,
     ),
     responses(
         (status = 200, description = "Kitchen staff session token found - Rate limit: 60 req/min with 10 burst allowance", body = RefreshToken),
+        (status = 403, description = "Forbidden — not the owner", body = ErrorResponse),
         (status = 404, description = "Session token not found or expired", body = ErrorResponse),
         (status = 500, description = "Database error during token retrieval", body = ErrorResponse)
     ),
@@ -118,6 +120,7 @@ pub async fn get_refresh_token(AuthenticatedUser(auth_user_id): AuthenticatedUse
     ),
     responses(
         (status = 204, description = "Kitchen staff session token revoked successfully - Rate limit: 20 req/min with 3 burst allowance"),
+        (status = 403, description = "Forbidden — not the owner", body = ErrorResponse),
         (status = 404, description = "Session token not found", body = ErrorResponse),
         (status = 500, description = "Database error during token revocation", body = ErrorResponse)
     ),
@@ -127,46 +130,28 @@ pub async fn get_refresh_token(AuthenticatedUser(auth_user_id): AuthenticatedUse
     )
 )]
 pub async fn delete_refresh_token(AuthenticatedUser(auth_user_id): AuthenticatedUser, State(pool): State<PgPool>, Path(id): Path<Uuid>) -> impl IntoResponse {
-    info!(token_id = %id, auth_user_id = %auth_user_id, "Deleting refresh token");
-    debug!("Checking token ownership before deletion");
+    info!(token_id = %id, auth_user_id = %auth_user_id, "Deleting refresh token with atomic ownership check");
 
-    // First, fetch the owner of the token
-    let owner_query = "SELECT user_id FROM refresh_tokens WHERE id = $1";
-    match sqlx::query_scalar::<_, Uuid>(owner_query)
+    // Single atomic operation: delete where id matches AND user_id matches
+    // This eliminates the TOCTOU race condition between owner lookup and deletion
+    let delete_sql = "DELETE FROM refresh_tokens WHERE id = $1 AND user_id = $2";
+    match sqlx::query(delete_sql)
         .bind(id)
-        .fetch_optional(&pool)
+        .bind(auth_user_id)
+        .execute(&pool)
         .await
     {
-        Ok(Some(owner_id)) => {
-            if owner_id != auth_user_id {
-                warn!(token_id = %id, owner_id = %owner_id, auth_user_id = %auth_user_id, "Authenticated user is not the owner of the refresh token");
-                return (StatusCode::FORBIDDEN, ErrorResponse::new("Forbidden", Some("You are not the owner of this token".to_string()))).into_response();
-            }
-
-            // Owner matches; perform delete
-            let delete_sql = "DELETE FROM refresh_tokens WHERE id = $1";
-            match sqlx::query(delete_sql).bind(id).execute(&pool).await {
-                Ok(res) if res.rows_affected() > 0 => {
-                    info!(token_id = %id, affected_rows = res.rows_affected(), "Refresh token deleted successfully");
-                    (StatusCode::NO_CONTENT, "").into_response()
-                }
-                Ok(res) => {
-                    // This would be unexpected since we found the row above, but handle defensively
-                    warn!(token_id = %id, affected_rows = res.rows_affected(), "No rows affected when attempting to delete refresh token");
-                    (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some("Failed to delete token".to_string()))).into_response()
-                }
-                Err(e) => {
-                    error!(token_id = %id, error = %e, "Failed to execute delete for refresh token");
-                    (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some(e.to_string()))).into_response()
-                }
-            }
+        Ok(res) if res.rows_affected() > 0 => {
+            info!(token_id = %id, auth_user_id = %auth_user_id, affected_rows = res.rows_affected(), "Refresh token deleted successfully with atomic operation");
+            (StatusCode::NO_CONTENT, "").into_response()
         }
-        Ok(None) => {
-            warn!(token_id = %id, "Refresh token not found for deletion");
-            (StatusCode::NOT_FOUND, ErrorResponse::new("Token not found", None)).into_response()
+        Ok(res) => {
+            // No rows affected means either token doesn't exist or user doesn't own it
+            warn!(token_id = %id, auth_user_id = %auth_user_id, affected_rows = res.rows_affected(), "No rows affected - token not found or user not owner");
+            (StatusCode::NOT_FOUND, ErrorResponse::new("Token not found", Some("Token does not exist or you are not the owner".to_string()))).into_response()
         }
         Err(e) => {
-            error!(token_id = %id, error = %e, "Failed to query refresh token owner before deletion");
+            error!(token_id = %id, auth_user_id = %auth_user_id, error = %e, "Failed to execute atomic delete for refresh token");
             (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some(e.to_string()))).into_response()
         }
     }
@@ -182,6 +167,7 @@ pub async fn delete_refresh_token(AuthenticatedUser(auth_user_id): Authenticated
     request_body = String,
     responses(
         (status = 200, description = "Kitchen staff session token updated successfully - Rate limit: 30 req/min with 5 burst allowance", body = RefreshToken),
+        (status = 403, description = "Forbidden — not the owner", body = ErrorResponse),
         (status = 404, description = "Session token not found", body = ErrorResponse),
         (status = 500, description = "Database error during token update", body = ErrorResponse)
     ),

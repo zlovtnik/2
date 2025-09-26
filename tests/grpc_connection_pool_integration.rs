@@ -1,6 +1,4 @@
 use std::time::Duration;
-use tokio::time::sleep;
-use tonic::transport::{Channel, Endpoint};
 
 // Import our connection pool
 use server::grpc::GrpcConnectionPool;
@@ -15,7 +13,7 @@ async fn test_connection_pool_creation() {
         Duration::from_secs(10),
     ).await;
     
-    // Should fail because endpoint doesn't exist, but pool should be created
+    // Should fail because endpoint doesn't exist
     assert!(pool.is_err());
 }
 
@@ -48,36 +46,36 @@ async fn test_connection_pool_health_status() {
     // Test health status logic
     let mut metrics = server::grpc::ConnectionPoolMetrics::default();
     
-    // Test unhealthy status
+    // Test unhealthy status - no connections available
     metrics.total_connections = 0;
-    metrics.active_connections = 0;
-    let status = if metrics.total_connections == 0 || metrics.active_connections == 0 {
+    metrics.available_connections = 0;
+    let status = if metrics.total_connections == 0 {
         "unhealthy"
-    } else if metrics.active_connections < metrics.total_connections {
+    } else if metrics.available_connections == 0 {
         "degraded"
     } else {
         "healthy"
     };
     assert_eq!(status, "unhealthy");
     
-    // Test degraded status
+    // Test degraded status - no available connections
     metrics.total_connections = 5;
-    metrics.active_connections = 3;
-    let status = if metrics.total_connections == 0 || metrics.active_connections == 0 {
+    metrics.available_connections = 0;
+    let status = if metrics.total_connections == 0 {
         "unhealthy"
-    } else if metrics.active_connections < metrics.total_connections {
+    } else if metrics.available_connections == 0 {
         "degraded"
     } else {
         "healthy"
     };
     assert_eq!(status, "degraded");
     
-    // Test healthy status
+    // Test healthy status - connections available
     metrics.total_connections = 5;
-    metrics.active_connections = 5;
-    let status = if metrics.total_connections == 0 || metrics.active_connections == 0 {
+    metrics.available_connections = 3;
+    let status = if metrics.total_connections == 0 {
         "unhealthy"
-    } else if metrics.active_connections < metrics.total_connections {
+    } else if metrics.available_connections == 0 {
         "degraded"
     } else {
         "healthy"
@@ -99,7 +97,7 @@ async fn test_connection_pool_semaphore_behavior() {
     
     // Fourth acquisition should block (we'll timeout to avoid hanging)
     let timeout_result = tokio::time::timeout(
-        Duration::from_millis(100),
+        Duration::from_millis(1000),
         semaphore.acquire()
     ).await;
     
@@ -117,7 +115,7 @@ async fn test_connection_pool_metrics_update() {
     metrics.available_connections = 4;
     metrics.connection_errors = 1;
     metrics.health_check_failures = 0;
-    metrics.last_health_check = Some(std::time::Instant::now());
+    metrics.last_health_check = Some(std::time::SystemTime::now());
     
     assert_eq!(metrics.total_connections, 5);
     assert_eq!(metrics.active_connections, 4);
@@ -151,9 +149,15 @@ async fn test_connection_pool_size_limits() {
     assert!(config.grpc_connection_pool_size <= 100); // Reasonable upper limit
 }
 
+#[serial_test::serial]
 #[tokio::test]
 async fn test_connection_pool_environment_variables() {
-    // Test that environment variables can override defaults
+    // Snapshot current environment variables to restore later
+    let original_pool_size = std::env::var("GRPC_CONNECTION_POOL_SIZE").ok();
+    let original_timeout = std::env::var("GRPC_CONNECTION_TIMEOUT_SECS").ok();
+    let original_interval = std::env::var("GRPC_HEALTH_CHECK_INTERVAL_SECS").ok();
+    
+    // Set test environment variables
     std::env::set_var("GRPC_CONNECTION_POOL_SIZE", "15");
     std::env::set_var("GRPC_CONNECTION_TIMEOUT_SECS", "45");
     std::env::set_var("GRPC_HEALTH_CHECK_INTERVAL_SECS", "120");
@@ -164,9 +168,18 @@ async fn test_connection_pool_environment_variables() {
     assert_eq!(config.grpc_connection_timeout_secs, 45);
     assert_eq!(config.grpc_health_check_interval_secs, 120);
     
-    // Clean up environment variables
-    std::env::remove_var("GRPC_CONNECTION_POOL_SIZE");
-    std::env::remove_var("GRPC_CONNECTION_TIMEOUT_SECS");
-    std::env::remove_var("GRPC_HEALTH_CHECK_INTERVAL_SECS");
+    // Restore original environment variables
+    match original_pool_size {
+        Some(value) => std::env::set_var("GRPC_CONNECTION_POOL_SIZE", value),
+        None => std::env::remove_var("GRPC_CONNECTION_POOL_SIZE"),
+    }
+    match original_timeout {
+        Some(value) => std::env::set_var("GRPC_CONNECTION_TIMEOUT_SECS", value),
+        None => std::env::remove_var("GRPC_CONNECTION_TIMEOUT_SECS"),
+    }
+    match original_interval {
+        Some(value) => std::env::set_var("GRPC_HEALTH_CHECK_INTERVAL_SECS", value),
+        None => std::env::remove_var("GRPC_HEALTH_CHECK_INTERVAL_SECS"),
+    }
 }
 

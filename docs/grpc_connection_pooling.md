@@ -118,7 +118,7 @@ rpc GetConnectionPoolMetrics(GetConnectionPoolMetricsRequest) returns (GetConnec
 
 The benchmarking suite compares performance with and without connection pooling:
 
-```
+```text
 Benchmarking grpc_connection_pooling/without_pooling/10
                         time:   [30.161 µs 30.468 µs 30.678 µs]
 
@@ -167,7 +167,7 @@ let connection_pool = GrpcConnectionPool::new(
 ).await?;
 
 // Get connection from pool
-let channel = connection_pool.get_connection().await?;
+let (channel, _permit) = connection_pool.get_connection().await?;
 
 // Use connection for gRPC calls
 // ... make gRPC requests using the channel

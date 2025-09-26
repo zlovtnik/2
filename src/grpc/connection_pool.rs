@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::{RwLock, Semaphore};
 use tokio::time::interval;
 use tonic::transport::{Channel, Endpoint};
@@ -14,7 +14,7 @@ pub struct ConnectionPoolMetrics {
     pub available_connections: usize,
     pub connection_errors: u64,
     pub health_check_failures: u64,
-    pub last_health_check: Option<Instant>,
+    pub last_health_check: Option<SystemTime>,
 }
 
 impl Default for ConnectionPoolMetrics {
@@ -108,7 +108,7 @@ impl GrpcConnectionPool {
         pool.create_connection().await?;
         
         // Start health monitoring
-        pool.start_health_monitoring().await;
+        pool.start_health_monitoring();
 
         info!(
             endpoint = %endpoint,
@@ -118,13 +118,13 @@ impl GrpcConnectionPool {
         Ok(pool)
     }
 
-    /// Get a connection from the pool
-    pub async fn get_connection(&self) -> Result<Channel, Box<dyn std::error::Error + Send + Sync>> {
+    /// Get a connection from the pool and an owned semaphore permit to enforce backpressure
+    pub async fn get_connection(&self) -> Result<(Channel, tokio::sync::OwnedSemaphorePermit), Box<dyn std::error::Error + Send + Sync>> {
         debug!("Requesting connection from gRPC pool");
         
         // Acquire semaphore permit
-        let _permit = self.semaphore.acquire().await
-            .map_err(|e| format!("Failed to acquire connection permit: {}", e))?;
+        let permit = self.semaphore.clone().acquire_owned().await
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
 
         let mut connections = self.connections.write().await;
         
@@ -136,14 +136,15 @@ impl GrpcConnectionPool {
                     connection_id = %connection.connection_id,
                     "Reusing existing healthy connection"
                 );
-                return Ok(connection.channel.clone());
+                return Ok((connection.channel.clone(), permit));
             }
         }
 
         // No healthy connections available, create a new one
         drop(connections);
         debug!("No healthy connections available, creating new connection");
-        self.create_connection().await
+        let channel = self.create_connection().await?;
+        Ok((channel, permit))
     }
 
     /// Create a new connection and add it to the pool
@@ -151,15 +152,21 @@ impl GrpcConnectionPool {
         debug!(endpoint = %self.endpoint, "Creating new gRPC connection");
         
         let endpoint = Endpoint::from_shared(self.endpoint.clone())
-            .map_err(|e| format!("Invalid endpoint: {}", e))?
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?
             .timeout(self.connection_timeout)
             .connect_timeout(self.connection_timeout);
 
-        let channel = endpoint.connect().await
-            .map_err(|e| {
+        let channel = match endpoint.connect().await {
+            Ok(ch) => ch,
+            Err(e) => {
                 error!(error = %e, "Failed to create gRPC connection");
-                format!("Connection failed: {}", e)
-            })?;
+                {
+                    let mut m = self.metrics.write().await;
+                    m.connection_errors = m.connection_errors.saturating_add(1);
+                }
+                return Err(Box::new(e));
+            }
+        };
 
         let pooled_connection = PooledConnection::new(channel.clone());
         let connection_id = pooled_connection.connection_id;
@@ -190,7 +197,7 @@ impl GrpcConnectionPool {
     }
 
     /// Start health monitoring for all connections
-    async fn start_health_monitoring(&mut self) {
+    fn start_health_monitoring(&mut self) {
         let connections = Arc::clone(&self.connections);
         let metrics = Arc::clone(&self.metrics);
         let health_check_interval = self.health_check_interval;
@@ -198,6 +205,7 @@ impl GrpcConnectionPool {
 
         let handle = tokio::spawn(async move {
             let mut interval = interval(health_check_interval);
+            interval.tick().await; // run immediately
             
             loop {
                 tokio::select! {
@@ -206,10 +214,10 @@ impl GrpcConnectionPool {
                         
                         let mut connections_guard = connections.write().await;
                         let mut metrics_guard = metrics.write().await;
-                        
-                        metrics_guard.last_health_check = Some(Instant::now());
+                        metrics_guard.last_health_check = Some(SystemTime::now());
                         
                         let mut healthy_count = 0;
+                        let mut newly_unhealthy: u64 = 0;
                         let total_count = connections_guard.len();
                         
                         for connection in connections_guard.iter_mut() {
@@ -226,6 +234,7 @@ impl GrpcConnectionPool {
                                         "Marking old connection as unhealthy"
                                     );
                                     connection.mark_unhealthy();
+                                    newly_unhealthy = newly_unhealthy.saturating_add(1);
                                 } else {
                                     healthy_count += 1;
                                 }
@@ -239,6 +248,8 @@ impl GrpcConnectionPool {
                         metrics_guard.total_connections = connections_guard.len();
                         metrics_guard.active_connections = healthy_count;
                         metrics_guard.available_connections = healthy_count;
+                        metrics_guard.health_check_failures =
+                            metrics_guard.health_check_failures.saturating_add(newly_unhealthy);
                         
                         info!(
                             total_connections = metrics_guard.total_connections,
@@ -269,8 +280,9 @@ impl GrpcConnectionPool {
         let healthy_count = connections.iter().filter(|c| c.is_healthy).count();
         
         metrics.total_connections = connections.len();
-        metrics.active_connections = healthy_count;
-        metrics.available_connections = healthy_count;
+        let available = self.semaphore.available_permits();
+        metrics.active_connections = self.max_connections.saturating_sub(available);
+        metrics.available_connections = available;
     }
 
     /// Get current connection pool metrics
@@ -287,17 +299,18 @@ impl GrpcConnectionPool {
     }
 
     /// Shutdown the connection pool and clean up background tasks
-    pub async fn shutdown(&self) {
+    pub async fn shutdown(&mut self) {
         info!("Shutting down gRPC connection pool");
         
         // Send shutdown signal to health monitoring task
         if let Err(e) = self.shutdown_sender.send(()) {
             warn!(error = %e, "Failed to send shutdown signal to health monitoring task");
         }
-        
-        // Wait for health monitoring task to complete if we have a handle
-        // Note: Since we can't store mutable JoinHandle in an immutable method,
-        // we'll just send the signal. The task will exit gracefully.
+        // Abort and await the task to ensure clean shutdown
+        if let Some(handle) = self.health_task_handle.take() {
+            handle.abort();
+            let _ = handle.await;
+        }
         
         // Clear all connections
         {

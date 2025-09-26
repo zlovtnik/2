@@ -15,11 +15,13 @@ impl MockGrpcClient {
             .timeout(Duration::from_secs(30))
             .connect_timeout(Duration::from_secs(30));
         
-        let channel = endpoint.connect().await?;
+        let channel = endpoint.connect_lazy();
         Ok(Self { channel })
     }
 
     async fn make_request(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Touch the channel so the field is read (avoid dead_code warning)
+        let _ = &self.channel;
         // Simulate a gRPC request
         tokio::time::sleep(Duration::from_millis(1)).await;
         Ok(())
@@ -41,7 +43,7 @@ impl SimpleConnectionPool {
                 .timeout(Duration::from_secs(30))
                 .connect_timeout(Duration::from_secs(30));
             
-            let channel = endpoint.connect().await?;
+            let channel = endpoint.connect_lazy();
             connections.push(channel);
         }
         

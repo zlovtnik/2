@@ -72,14 +72,19 @@
 //! ```
 
 use axum::{Json, response::IntoResponse};
-use axum::extract::FromRef;
 use axum::http::request::Parts;
 use axum::extract::FromRequestParts;
-use axum::RequestPartsExt;
 use std::ops::Deref;
 
 /// Simple extractor to pull a Bearer token string from the Authorization header.
+#[derive(Debug, Clone)]
 pub struct BearerToken(String);
+
+impl AsRef<str> for BearerToken {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
 
 impl Deref for BearerToken {
     type Target = str;
@@ -657,7 +662,9 @@ pub async fn login(State(pool): State<PgPool>, Json(mut payload): Json<LoginRequ
     post,
     path = "/api/v1/auth/refresh",
     responses(
-        (status = 200, description = "Kitchen staff authentication token refreshed successfully - Rate limit: 20 req/min with 5 burst allowance")
+        (status = 200, description = "Token refreshed", body = TokenResponse),
+        (status = 401, description = "Invalid or expired token", body = ErrorResponse),
+        (status = 500, description = "Failed to generate refreshed token", body = ErrorResponse)
     ),
     tag = "Kitchen Staff Authentication",
     security(
@@ -698,6 +705,7 @@ mod tests {
     use std::time::Duration;
 
     // Create a test database connection pool
+    #[allow(dead_code)]
     async fn dummy_pool() -> PgPool {
         let database_url = std::env::var("APP_DATABASE_URL")
             .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/postgres".to_string());

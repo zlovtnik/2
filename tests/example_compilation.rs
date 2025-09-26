@@ -126,6 +126,13 @@ fn find_rust_files(dir: &Path) -> Vec<std::path::PathBuf> {
 
 fn validate_example_file_compilation(file_path: &Path) {
     // Check if the file compiles as a standalone example
+    // Create a temporary directory for the compiled binary so tests are portable
+    let temp_dir = TempDir::new().expect("Failed to create temp dir for example compilation");
+    let out_path = temp_dir.path().join("example_test");
+    let out_str = out_path
+        .to_str()
+        .expect("Temporary output path is not valid UTF-8");
+
     let output = Command::new("rustc")
         .args(&[
             "--edition", "2021",
@@ -135,7 +142,8 @@ fn validate_example_file_compilation(file_path: &Path) {
             "--extern", "serde_json",
             "--extern", "reqwest",
             file_path.to_str().unwrap(),
-            "-o", "/tmp/example_test"
+            "-o",
+            out_str,
         ])
         .output()
         .expect("Failed to compile example file");
@@ -143,10 +151,12 @@ fn validate_example_file_compilation(file_path: &Path) {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         panic!(
-            "Example file {:?} failed to compile:\n{}", 
+            "Example file {:?} failed to compile:\n{}",
             file_path, stderr
         );
     }
+
+    // TempDir will be cleaned up when dropped at the end of this function scope.
 }
 
 fn test_authentication_code_examples(temp_dir: &TempDir) {

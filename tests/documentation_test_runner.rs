@@ -7,6 +7,7 @@ use std::env;
 use std::time::Instant;
 use tokio::time::{sleep, Duration};
 use std::net::SocketAddr;
+use reqwest::Client;
 
 #[cfg(test)]
 mod documentation_integration_tests {
@@ -89,7 +90,15 @@ mod documentation_integration_tests {
             axum::serve(listener, app_service).await.unwrap();
         });
         
-        sleep(Duration::from_millis(100)).await;
+        // Poll for server readiness
+        let client = Client::new();
+        let health_url = format!("http://{}/health/live", local_addr);
+        for _ in 0..10 {
+            if client.get(&health_url).send().await.is_ok() {
+                break;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
         
     // Create example validator (client not used during static validation)
     let base_url = format!("http://{}", local_addr);
@@ -273,21 +282,19 @@ fn find_undocumented_public_apis() -> Vec<String> {
     
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        
-        // Parse warnings for missing documentation
+
+        use regex::Regex;
+        let re = Regex::new(r"missing documentation for .*?`([^`]+)`").unwrap();
+
         for line in stderr.lines() {
-            if line.contains("missing documentation for") {
-                if let Some(start) = line.find("missing documentation for ") {
-                    let api_part = &line[start + 26..];
-                    if let Some(end) = api_part.find('`') {
-                        let api_name = &api_part[1..end];
-                        missing_docs.push(api_name.to_string());
-                    }
+            if let Some(captures) = re.captures(line) {
+                if let Some(api_name) = captures.get(1) {
+                    missing_docs.push(api_name.as_str().to_string());
                 }
             }
         }
     }
-    
+
     missing_docs
 }
 
@@ -350,8 +357,8 @@ fn count_paths_with_descriptions(spec: &utoipa::openapi::OpenApi) -> usize {
                 return true;
             }
 
-            // Iterate operations on the PathItem and check each Operation's description/summary
-            for (_method, operation) in &path_item.operations {
+            // Iterate operations via public map to avoid relying on fields
+            for operation in path_item.operations.values() {
                 if operation.description.is_some() || operation.summary.is_some() {
                     return true;
                 }
@@ -367,10 +374,7 @@ fn count_paths_with_descriptions(spec: &utoipa::openapi::OpenApi) -> usize {
 
 fn count_total_operations(spec: &utoipa::openapi::OpenApi) -> usize {
     spec.paths.paths.iter()
-        .map(|(_, path_item)| {
-            // Count operations directly from the PathItem
-            path_item.operations.len()
-        })
+        .map(|(_, path_item)| path_item.operations.len())
         .sum()
 }
 

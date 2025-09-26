@@ -19,6 +19,7 @@ use user_stats::{
     HealthCheckResponse,
     GetConnectionPoolMetricsRequest,
     GetConnectionPoolMetricsResponse,
+    HealthStatus,
 };
 
 pub struct UserStatsServiceImpl {
@@ -162,13 +163,11 @@ impl UserStatsService for UserStatsServiceImpl {
         let metrics = self.connection_pool.get_metrics().await;
         
         let status = if metrics.total_connections == 0 {
-            "unhealthy"
-        } else if metrics.active_connections == 0 {
-            "unhealthy"
-        } else if metrics.active_connections < metrics.total_connections {
-            "degraded"
+            HealthStatus::Unhealthy
+        } else if metrics.available_connections == 0 || metrics.health_check_failures > 0 {
+            HealthStatus::Degraded
         } else {
-            "healthy"
+            HealthStatus::Healthy
         };
         
         let message = format!(
@@ -179,20 +178,20 @@ impl UserStatsService for UserStatsServiceImpl {
             metrics.health_check_failures
         );
         
-        let timestamp = std::time::SystemTime::now()
+        let ts_now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs() as i64;
+            .unwrap_or_default();
+        let timestamp = Some(prost_types::Timestamp { seconds: ts_now.as_secs() as i64, nanos: ts_now.subsec_nanos() as i32 });
         
         let response = HealthCheckResponse {
-            status: status.to_string(),
+            status: status as i32,
             message,
             timestamp,
         };
         
         let duration = start_time.elapsed();
         info!(
-            status = %status,
+            status = ?status,
             duration_ms = duration.as_millis(),
             "gRPC HealthCheck completed"
         );
@@ -209,21 +208,18 @@ impl UserStatsService for UserStatsServiceImpl {
         
         let metrics = self.connection_pool.get_metrics().await;
         
-        let last_health_check_timestamp = metrics.last_health_check
-            .map(|_instant| {
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs() as i64
-            });
+        let last_health_check = metrics.last_health_check.map(|st| {
+            let ts = st.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+            prost_types::Timestamp { seconds: ts.as_secs() as i64, nanos: ts.subsec_nanos() as i32 }
+        });
         
         let response = GetConnectionPoolMetricsResponse {
-            total_connections: metrics.total_connections as i32,
-            active_connections: metrics.active_connections as i32,
-            available_connections: metrics.available_connections as i32,
-            connection_errors: metrics.connection_errors as i64,
-            health_check_failures: metrics.health_check_failures as i64,
-            last_health_check_timestamp,
+            total_connections: metrics.total_connections as u32,
+            active_connections: metrics.active_connections as u32,
+            available_connections: metrics.available_connections as u32,
+            connection_errors: metrics.connection_errors as u64,
+            health_check_failures: metrics.health_check_failures as u64,
+            last_health_check,
         };
         
         let duration = start_time.elapsed();

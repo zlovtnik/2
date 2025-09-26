@@ -95,19 +95,19 @@ pub fn app(pool: PgPool) -> Router {
     app
 }
 
-pub async fn grpc_server(pool: PgPool, addr: SocketAddr, config: &crate::config::Config) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn grpc_server(pool: PgPool, addr: SocketAddr, config: &crate::config::Config) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use grpc::user_stats::{user_stats::user_stats_service_server::UserStatsServiceServer, UserStatsServiceImpl};
     use tonic_reflection::server::Builder as ReflectionBuilder;
     use std::time::Duration;
 
     // Create connection pool for gRPC services
-    let grpc_endpoint = format!("http://127.0.0.1:{}", config.server_port + 1);
+    let grpc_endpoint = config.grpc_upstream_endpoint.clone();
     let connection_pool = grpc::GrpcConnectionPool::new(
         grpc_endpoint,
         config.grpc_connection_pool_size,
         Duration::from_secs(config.grpc_connection_timeout_secs),
         Duration::from_secs(config.grpc_health_check_interval_secs),
-    ).await.map_err(|e| format!("Failed to create gRPC connection pool: {}", e))?;
+    ).await?;
 
     let user_stats_service = UserStatsServiceImpl::new(pool, connection_pool);
 

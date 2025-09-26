@@ -26,6 +26,7 @@ A production-grade, enterprise-ready kitchen management system built with Rust, 
 - **WebSocket Integration** - Live order updates and kitchen display systems
 - **gRPC Services** - High-performance inter-service communication with connection pooling
 - **Connection Pooling** - Optimized gRPC connection management with health monitoring
+  - Learn more: docs/grpc_connection_pooling.md
 - **Mobile API** - Native mobile app support for staff and management
 - **Kitchen Display** - Real-time order status and preparation tracking
 

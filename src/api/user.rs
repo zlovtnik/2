@@ -172,7 +172,7 @@ pub async fn delete_user(AuthenticatedUser(user_id): AuthenticatedUser, State(po
     // are not implemented yet; extend this block if role claims are added.
     if user_id != id {
         warn!(requested_id = %id, authenticated_user_id = %user_id, "Unauthorized delete attempt - users may only delete their own account");
-        return (StatusCode::FORBIDDEN, ErrorResponse::new("Forbidden", Some("You are not allowed to delete this user".to_string()))).into_response();
+        return (StatusCode::FORBIDDEN, Json(ErrorResponse::new("Forbidden", Some("You are not allowed to delete this user".to_string())))).into_response();
     }
     debug!("Creating user CRUD instance for deletion");
     
@@ -315,7 +315,7 @@ pub async fn update_user(AuthenticatedUser(user_id): AuthenticatedUser, State(po
     // to allow admins to update other users.
     if user_id != id {
         warn!(requested_id = %id, authenticated_user_id = %user_id, "Unauthorized update attempt - users may only update their own account");
-        return (StatusCode::FORBIDDEN, ErrorResponse::new("Forbidden", Some("You are not allowed to update this user".to_string()))).into_response();
+        return (StatusCode::FORBIDDEN, Json(ErrorResponse::new("Forbidden", Some("You are not allowed to update this user".to_string())))).into_response();
     }
     debug!("Creating user CRUD instance for update");
     

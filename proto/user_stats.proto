@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+import "google/protobuf/timestamp.proto";
+
 package user_stats;
 
 // Service for user statistics operations
@@ -32,14 +34,11 @@ message GetCurrentUserStatsResponse {
     optional string last_login = 8;  // ISO 8601 timestamp, optional
 }
 
-message AuthError {
-    string message = 1;
-    string code = 2;
-}
-
-message UserNotFoundError {
-    string message = 1;
-    string user_id = 2;
+enum HealthStatus {
+  HEALTH_STATUS_UNSPECIFIED = 0;
+  HEALTHY = 1;
+  DEGRADED = 2;
+  UNHEALTHY = 3;
 }
 
 message HealthCheckRequest {
@@ -47,9 +46,9 @@ message HealthCheckRequest {
 }
 
 message HealthCheckResponse {
-    string status = 1;  // "healthy", "unhealthy", "degraded"
+    HealthStatus status = 1;
     string message = 2;
-    int64 timestamp = 3;  // Unix timestamp
+    google.protobuf.Timestamp timestamp = 3;
 }
 
 message GetConnectionPoolMetricsRequest {
@@ -57,10 +56,10 @@ message GetConnectionPoolMetricsRequest {
 }
 
 message GetConnectionPoolMetricsResponse {
-    int32 total_connections = 1;
-    int32 active_connections = 2;
-    int32 available_connections = 3;
-    int64 connection_errors = 4;
-    int64 health_check_failures = 5;
-    optional int64 last_health_check_timestamp = 6;  // Unix timestamp
+    uint32 total_connections = 1;
+    uint32 active_connections = 2;
+    uint32 available_connections = 3;
+    uint64 connection_errors = 4;
+    uint64 health_check_failures = 5;
+    optional google.protobuf.Timestamp last_health_check = 6;
 }
