@@ -45,4 +45,3 @@ Thumbs.db
 
 # Ignore local test output
 /tests/output/ 
-prod/
