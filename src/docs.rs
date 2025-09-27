@@ -58,6 +58,7 @@ pub mod validation;
             
             // User schemas
             crate::core::user::User,
+            crate::api::user::PublicUser,
             crate::api::user::UserWithRequesterId,
             crate::api::user::UserInfoWithStats,
             
@@ -108,6 +109,24 @@ pub mod validation;
     external_docs(
         url = "/docs",
         description = "Complete kitchen management API documentation including workflow guides, integration examples, and best practices for restaurant operations"
-    )
+    ),
+    modifiers(&SecurityAddon)
 )]
-pub struct ApiDoc; 
+pub struct ApiDoc;
+
+struct SecurityAddon;
+
+impl utoipa::Modify for SecurityAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        if let Some(components) = openapi.components.as_mut() {
+            let mut http_security = utoipa::openapi::security::Http::new(utoipa::openapi::security::HttpAuthScheme::Bearer);
+            http_security.bearer_format = Some("JWT".to_string());
+            http_security.description = Some("JWT Bearer token authentication. Include the token in the Authorization header as 'Bearer <token>'.".to_string());
+            
+            components.add_security_scheme(
+                "bearer_auth",
+                utoipa::openapi::security::SecurityScheme::Http(http_security)
+            )
+        }
+    }
+} 

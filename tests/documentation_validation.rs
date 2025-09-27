@@ -12,6 +12,9 @@ use std::net::SocketAddr;
 use reqwest::Client;
 use axum::http::StatusCode;
 
+// Include shared test utilities module placed at tests/common/mod.rs
+mod common;
+
 /// Test suite for documentation validation
 #[cfg(test)]
 mod documentation_tests {
@@ -134,24 +137,10 @@ mod documentation_endpoints_tests {
     use super::*;
     use std::env;
 
-    async fn create_test_app() -> axum::Router {
-        use server::app;
-        use sqlx::PgPool;
-        
-        // Set up test environment
-        env::set_var("APP_DATABASE_URL", "postgres://user:pass@localhost/postgres");
-        env::set_var("JWT_SECRET", "your-super-secret-jwt-key-here");
-        
-        let db_url = env::var("APP_DATABASE_URL").unwrap();
-        let pool = PgPool::connect_lazy(&db_url).unwrap();
-        
-        app(pool)
-    }
-
     /// Test that documentation endpoints are accessible
     #[tokio::test]
     async fn test_documentation_endpoints_accessible() {
-        let app = create_test_app().await;
+    let app = crate::common::create_test_app().await;
         
         // Start the app in the background
         let addr = SocketAddr::from(([127, 0, 0, 1], 0));
@@ -159,12 +148,23 @@ mod documentation_endpoints_tests {
         let local_addr = listener.local_addr().unwrap();
 
         let app_service = app.into_make_service();
-        tokio::spawn(async move {
+        let _server_handle = tokio::spawn(async move {
             axum::serve(listener, app_service).await.unwrap();
         });
         
-        sleep(Duration::from_millis(100)).await;
+        // Prepare client and wait for server to be ready with exponential backoff
         let client = Client::new();
+        let mut retries = 0;
+        while retries < 10 {
+            if client.get(format!("http://{}/health/live", local_addr))
+                .send().await.is_ok() {
+                break;
+            }
+            sleep(Duration::from_millis(50 * (2_u64.pow(retries)))).await;
+            retries += 1;
+        }
+        // At end of test, abort the server if needed
+        // server_handle.abort();
 
         // Note: Swagger UI endpoints are currently commented out in lib.rs
         // This test validates the current state and can be updated when Swagger UI is re-enabled
@@ -214,7 +214,7 @@ mod example_validation_tests {
         env::set_var("APP_DATABASE_URL", "postgres://user:pass@localhost/postgres");
         env::set_var("JWT_SECRET", "your-super-secret-jwt-key-here");
         
-        let app = create_test_app().await;
+    let app = crate::common::create_test_app().await;
         let addr = SocketAddr::from(([127, 0, 0, 1], 0));
         let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
         let local_addr = listener.local_addr().unwrap();
@@ -274,7 +274,7 @@ mod example_validation_tests {
     /// Test that health check examples work correctly
     #[tokio::test]
     async fn test_health_check_examples() {
-        let app = create_test_app().await;
+    let app = crate::common::create_test_app().await;
         let addr = SocketAddr::from(([127, 0, 0, 1], 0));
         let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
         let local_addr = listener.local_addr().unwrap();
@@ -309,15 +309,7 @@ mod example_validation_tests {
         assert_eq!(ready_response.status(), StatusCode::OK);
     }
 
-    async fn create_test_app() -> axum::Router {
-        use server::app;
-        use sqlx::PgPool;
-        
-        let db_url = env::var("APP_DATABASE_URL").unwrap();
-        let pool = PgPool::connect_lazy(&db_url).unwrap();
-        
-        app(pool)
-    }
+    // Using shared `create_test_app` from `tests/common/mod.rs` via crate::common::create_test_app()
 }
 
 /// Helper functions for documentation validation
@@ -439,8 +431,8 @@ fn validate_module_documentation(module_path: &str) {
     // This is a simplified validation - in a real implementation,
     // you might use syn or other parsing libraries to analyze the AST
     let output = Command::new("cargo")
-        .args(&["doc", "--no-deps", "--document-private-items", "--", "-D", "missing_docs"])
-        .env("RUSTDOCFLAGS", format!("--document-private-items -D missing_docs"))
+        .args(&["doc", "--no-deps", "--document-private-items"])
+        .env("RUSTDOCFLAGS", "-D missing_docs")
         .output()
         .expect("Failed to run cargo doc for module validation");
     

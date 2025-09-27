@@ -35,7 +35,7 @@ async fn main() {
     if enable_grpc {
         tracing::info!("gRPC server enabled");
         let grpc_pool = pool.clone();
-        let grpc_addr = SocketAddr::from(([0, 0, 0, 0], config.server_port + 1));
+        let grpc_addr = SocketAddr::from(([0, 0, 0, 0], config.server_port.saturating_add(1)));
         
         // Start both servers concurrently
         let rest_server = async {
@@ -56,7 +56,7 @@ async fn main() {
         };
         
         let grpc_server_task = async {
-            if let Err(e) = grpc_server(grpc_pool, grpc_addr).await {
+            if let Err(e) = grpc_server(grpc_pool, grpc_addr, &config).await {
                 tracing::error!("gRPC server error: {}", e);
                 // Check if it's a port binding issue
                 if e.to_string().contains("Address already in use") || e.to_string().contains("AddrInUse") {

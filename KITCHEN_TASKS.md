@@ -174,6 +174,8 @@ This file tracks the implementation progress of 24 prioritized tasks to transfor
 **Acceptance criteria**:
 - [ ] Configurable connection pool size
 - [ ] Connection health monitoring
+
+- Documentation: see docs/grpc_connection_pooling.md
 - [ ] Performance benchmarks showing improvement
 
 **Implementation Notes**:

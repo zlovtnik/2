@@ -95,17 +95,27 @@ pub fn app(pool: PgPool) -> Router {
     app
 }
 
-pub async fn grpc_server(pool: PgPool, addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn grpc_server(pool: PgPool, addr: SocketAddr, config: &crate::config::Config) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use grpc::user_stats::{user_stats::user_stats_service_server::UserStatsServiceServer, UserStatsServiceImpl};
     use tonic_reflection::server::Builder as ReflectionBuilder;
+    use std::time::Duration;
 
-    let user_stats_service = UserStatsServiceImpl::new(pool);
+    // Create connection pool for gRPC services
+    let grpc_endpoint = config.grpc_upstream_endpoint.clone();
+    let connection_pool = grpc::GrpcConnectionPool::new(
+        grpc_endpoint,
+        config.grpc_connection_pool_size,
+        Duration::from_secs(config.grpc_connection_timeout_secs),
+        Duration::from_secs(config.grpc_health_check_interval_secs),
+    ).await?;
+
+    let user_stats_service = UserStatsServiceImpl::new(pool, connection_pool);
 
     let reflection_service = ReflectionBuilder::configure()
         .register_encoded_file_descriptor_set(include_bytes!(concat!(env!("OUT_DIR"), "/user_stats.bin")))
         .build()?;
 
-    tracing::info!("Starting gRPC server on {}", addr);
+    tracing::info!("Starting gRPC server on {} with connection pooling", addr);
 
     Server::builder()
         .add_service(UserStatsServiceServer::new(user_stats_service))

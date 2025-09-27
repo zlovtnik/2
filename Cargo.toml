@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tokio = { version = "1.0", features = ["full", "time"] }
+tokio = { version = "1", features = ["full", "time", "macros", "rt-multi-thread"] }
 tower = "0.4"
 tower-http = { version = "0.5.0", features = ["trace", "cors"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -41,16 +41,25 @@ utoipa-swagger-ui = { version = "4.0.0", features = ["axum"] }
 # gRPC
 tonic = "0.10"
 prost = "0.12"
+prost-types = "0.12"
 tonic-reflection = "0.10"
 
 [build-dependencies]
 tonic-build = { version = "0.10", features = ["prost"] }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }
+tokio = { version = "1", features = ["test-util"] }
 serde_json = "1.0"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 tokio-test = "0.4"
 tempfile = "3.8"
 serial_test = "3.0"
 regex = "1.10"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[features]
+openapi-validate = []
+
+[[bench]]
+name = "grpc_connection_pool_benchmark"
+harness = false

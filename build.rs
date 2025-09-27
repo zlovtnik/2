@@ -1,5 +1,20 @@
 use std::process::Command;
 
+/// RAII guard for DOC_VALIDATION_IN_PROGRESS environment variable
+struct DocValidationGuard;
+
+impl DocValidationGuard {
+    fn new() -> Self {
+        std::env::set_var("DOC_VALIDATION_IN_PROGRESS", "1");
+        Self
+    }
+}
+
+impl Drop for DocValidationGuard {
+    fn drop(&mut self) {
+        std::env::remove_var("DOC_VALIDATION_IN_PROGRESS");
+    }
+}
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Existing protobuf compilation
     let out_dir = std::env::var("OUT_DIR").unwrap();
@@ -41,20 +56,17 @@ fn validate_documentation_during_build() -> Result<(), Box<dyn std::error::Error
     println!("cargo:rerun-if-changed=src/");
     println!("cargo:rerun-if-changed=tests/");
 
-    // Set reentrancy guard
-    std::env::set_var("DOC_VALIDATION_IN_PROGRESS", "1");
+    // Create RAII guard that sets the environment variable and ensures cleanup
+    let _guard = DocValidationGuard::new();
 
     // Validate that documentation can be generated
     validate_rustdoc_generation()?;
 
-    // Validate OpenAPI spec generation
-    validate_openapi_generation()?;
+    // Placeholder OpenAPI validation (currently just a stub)
+    placeholder_openapi_validation()?;
 
     // Run documentation tests if available
     run_documentation_tests()?;
-
-    // Clean up reentrancy guard
-    std::env::remove_var("DOC_VALIDATION_IN_PROGRESS");
 
     Ok(())
 }
@@ -64,24 +76,7 @@ fn validate_rustdoc_generation() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:warning=Validating rustdoc generation...");
 
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
-    let mut command = Command::new(cargo);
-    command
-        .args(&["doc", "--no-deps", "--quiet"])
-        .env("DOC_VALIDATION_IN_PROGRESS", "1")  // Prevent reentrancy
-        .env_remove("CARGO_PRIMARY_PACKAGE")     // Remove to avoid confusion
-        .env_remove("CARGO_TARGET_DIR");         // Use default target dir
-
-    // Preserve important environment variables
-    if let Ok(value) = std::env::var("RUSTDOCFLAGS") {
-        command.env("RUSTDOCFLAGS", value);
-    }
-    if let Ok(value) = std::env::var("RUSTFLAGS") {
-        command.env("RUSTFLAGS", value);
-    }
-    if let Ok(value) = std::env::var("OUT_DIR") {
-        command.env("OUT_DIR", value);
-    }
-
+    let mut command = create_cargo_command(&cargo, &["doc", "--no-deps", "--quiet"]);
     let output = command.output()?;
 
     if !output.status.success() {
@@ -95,31 +90,67 @@ fn validate_rustdoc_generation() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Validate that OpenAPI specification can be generated
+/// Validate OpenAPI specification generation and compilation
 fn validate_openapi_generation() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:warning=Validating OpenAPI specification generation...");
-    
-    // This will be validated by the compilation of the docs module
-    // If the OpenAPI spec has issues, the compilation will fail
-    
+
+    // Try to compile the docs module which contains OpenAPI generation
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let mut command = create_cargo_command(&cargo, &["check", "--lib", "--features", "docs"]);
+    let output = command.output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        println!("cargo:warning=OpenAPI specification generation failed: {}", stderr);
+        println!("cargo:warning=cargo check stdout: {}", stdout);
+        return Err("OpenAPI specification generation failed".into());
+    }
+
+    println!("cargo:warning=OpenAPI specification validation completed successfully");
     Ok(())
 }
 
-/// Run documentation-specific tests during build
-fn run_documentation_tests() -> Result<(), Box<dyn std::error::Error>> {
-    // Only run doc tests during build validation
-    // Skip integration tests to avoid requiring database setup during build
+/// OpenAPI validation with feature flag support
+fn placeholder_openapi_validation() -> Result<(), Box<dyn std::error::Error>> {
+    // Check if openapi-validate feature is enabled
+    if cfg!(feature = "openapi-validate") {
+        println!("cargo:warning=OpenAPI validation enabled via feature flag");
+        return validate_openapi_generation();
+    }
 
-    println!("cargo:warning=Running documentation tests...");
+    // Check if explicitly enabled via environment variable
+    if std::env::var("ENABLE_OPENAPI_VALIDATION").is_ok() {
+        println!("cargo:warning=OpenAPI validation enabled via environment variable");
+        return validate_openapi_generation();
+    }
 
-    let mut command = Command::new("cargo");
+    // Default behavior: warn but don't fail
+    println!("cargo:warning=OpenAPI validation is disabled - use 'openapi-validate' feature or ENABLE_OPENAPI_VALIDATION env var to enable");
+    
+    // Return the result from a no-op validation to maintain proper error propagation
+    validate_openapi_generation_noop()
+}
+
+/// No-op OpenAPI validation that always succeeds but maintains Result type
+fn validate_openapi_generation_noop() -> Result<(), Box<dyn std::error::Error>> {
+    // This is a no-op that always succeeds, but maintains the Result type
+    // for proper error propagation when the feature is enabled
+    Ok(())
+}
+
+/// Create a cargo Command with common environment and flags used for
+/// documentation validation. This centralizes the setup used by multiple
+/// functions so behavior stays consistent.
+fn create_cargo_command<C: AsRef<str>>(cargo_executable: C, args: &[&str]) -> Command {
+    let cargo = cargo_executable.as_ref();
+    let mut command = Command::new(cargo);
     command
-        .args(&["test", "--doc", "--quiet"])
-        .env("DOC_VALIDATION_IN_PROGRESS", "1")  // Prevent reentrancy
-        .env_remove("CARGO_PRIMARY_PACKAGE")     // Remove to avoid confusion
-        .env_remove("CARGO_TARGET_DIR");         // Use default target dir
+        .args(args)
+        .env("DOC_VALIDATION_IN_PROGRESS", "1")
+        .env_remove("CARGO_PRIMARY_PACKAGE")
+        .env_remove("CARGO_TARGET_DIR");
 
-    // Preserve important environment variables
     if let Ok(value) = std::env::var("RUSTDOCFLAGS") {
         command.env("RUSTDOCFLAGS", value);
     }
@@ -130,6 +161,17 @@ fn run_documentation_tests() -> Result<(), Box<dyn std::error::Error>> {
         command.env("OUT_DIR", value);
     }
 
+    command
+}
+
+/// Run documentation-specific tests during build
+fn run_documentation_tests() -> Result<(), Box<dyn std::error::Error>> {
+    // Only run doc tests during build validation
+    // Skip integration tests to avoid requiring database setup during build
+
+    println!("cargo:warning=Running documentation tests...");
+
+    let mut command = create_cargo_command("cargo", &["test", "--doc", "--quiet"]);
     let output = command.output()?;
 
     if !output.status.success() {
