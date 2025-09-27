@@ -2,7 +2,7 @@ use axum::{Json, extract::{Path, State}, response::IntoResponse};
 use uuid::Uuid;
 use crate::core::refresh_token::RefreshToken;
 use crate::infrastructure::database::{Crud, PgCrud, UpdatableCrud};
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use axum::http::StatusCode;
 use crate::api::auth::ErrorResponse;
 use crate::middleware::auth::AuthenticatedUser;
@@ -129,29 +129,76 @@ pub async fn get_refresh_token(AuthenticatedUser(auth_user_id): AuthenticatedUse
         ("bearer_auth" = [])
     )
 )]
-pub async fn delete_refresh_token(AuthenticatedUser(auth_user_id): AuthenticatedUser, State(pool): State<PgPool>, Path(id): Path<Uuid>) -> impl IntoResponse {
-    info!(token_id = %id, auth_user_id = %auth_user_id, "Deleting refresh token with atomic ownership check");
+pub async fn delete_refresh_token(
+    AuthenticatedUser(auth_user_id): AuthenticatedUser,
+    State(pool): State<PgPool>,
+    Path(id): Path<Uuid>
+) -> impl IntoResponse {
+    info!(token_id = %id, auth_user_id = %auth_user_id, "Deleting refresh token with ownership check and atomic delete");
 
-    // Single atomic operation: delete where id matches AND user_id matches
-    // This eliminates the TOCTOU race condition between owner lookup and deletion
-    let delete_sql = "DELETE FROM refresh_tokens WHERE id = $1 AND user_id = $2";
-    match sqlx::query(delete_sql)
+    // Start a transaction for atomicity
+    let mut tx = match pool.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            error!(token_id = %id, auth_user_id = %auth_user_id, error = %e, "Failed to start transaction for refresh token delete");
+            return (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some(e.to_string()))).into_response();
+        }
+    };
+
+    // Lock the token row for update to prevent TOCTOU
+    let select_sql = "SELECT user_id FROM refresh_tokens WHERE id = $1 FOR UPDATE";
+    match sqlx::query(select_sql)
         .bind(id)
-        .bind(auth_user_id)
-        .execute(&pool)
+        .fetch_optional(&mut *tx)
         .await
     {
-        Ok(res) if res.rows_affected() > 0 => {
-            info!(token_id = %id, auth_user_id = %auth_user_id, affected_rows = res.rows_affected(), "Refresh token deleted successfully with atomic operation");
-            (StatusCode::NO_CONTENT, "").into_response()
+        Ok(Some(row)) => {
+            let owner_id: Uuid = match row.try_get("user_id") {
+                Ok(id) => id,
+                Err(e) => {
+                    error!(error = %e, "Failed to get user_id from row");
+                    let _ = tx.rollback().await;
+                    return (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some("Failed to process token ownership".to_string()))).into_response();
+                }
+            };
+            if owner_id != auth_user_id {
+                warn!(token_id = %id, owner_id = %owner_id, auth_user_id = %auth_user_id, "Authenticated user is not the owner of the refresh token");
+                // Rollback transaction
+                let _ = tx.rollback().await;
+                return (StatusCode::FORBIDDEN, ErrorResponse::new("Forbidden", Some("You are not the owner of this token".to_string()))).into_response();
+            }
+            // Owner matches, proceed to delete
+            let delete_sql = "DELETE FROM refresh_tokens WHERE id = $1";
+            match sqlx::query(delete_sql)
+                .bind(id)
+                .execute(&mut *tx)
+                .await
+            {
+                Ok(res) if res.rows_affected() > 0 => {
+                    let _ = tx.commit().await;
+                    info!(token_id = %id, auth_user_id = %auth_user_id, affected_rows = res.rows_affected(), "Refresh token deleted successfully");
+                    (StatusCode::NO_CONTENT, "").into_response()
+                }
+                Ok(_) => {
+                    let _ = tx.rollback().await;
+                    warn!(token_id = %id, auth_user_id = %auth_user_id, "Token disappeared before delete");
+                    (StatusCode::NOT_FOUND, ErrorResponse::new("Token not found", None)).into_response()
+                }
+                Err(e) => {
+                    let _ = tx.rollback().await;
+                    error!(token_id = %id, auth_user_id = %auth_user_id, error = %e, "Failed to delete refresh token");
+                    (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some(e.to_string()))).into_response()
+                }
+            }
         }
-        Ok(res) => {
-            // No rows affected means either token doesn't exist or user doesn't own it
-            warn!(token_id = %id, auth_user_id = %auth_user_id, affected_rows = res.rows_affected(), "No rows affected - token not found or user not owner");
-            (StatusCode::NOT_FOUND, ErrorResponse::new("Token not found", Some("Token does not exist or you are not the owner".to_string()))).into_response()
+        Ok(None) => {
+            let _ = tx.rollback().await;
+            warn!(token_id = %id, auth_user_id = %auth_user_id, "Token not found for delete");
+            (StatusCode::NOT_FOUND, ErrorResponse::new("Token not found", None)).into_response()
         }
         Err(e) => {
-            error!(token_id = %id, auth_user_id = %auth_user_id, error = %e, "Failed to execute atomic delete for refresh token");
+            let _ = tx.rollback().await;
+            error!(token_id = %id, auth_user_id = %auth_user_id, error = %e, "Failed to select refresh token for delete");
             (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some(e.to_string()))).into_response()
         }
     }
@@ -227,28 +274,40 @@ pub async fn update_refresh_token(AuthenticatedUser(auth_user_id): Authenticated
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{body::Body, http::{Request, StatusCode}, Router, routing::post};
-    use serde_json::json;
+    use axum::{
+        body::Body, 
+        http::{Request, StatusCode}, 
+        Router, 
+        routing::post
+    };
     use tower::ServiceExt; // for `oneshot`
-    use sqlx::PgPool;
+    use serde_json::json;
     use chrono::Utc;
     use uuid::Uuid;
+    use sqlx::PgPool;
 
     fn dummy_pool() -> PgPool {
         PgPool::connect_lazy("postgres://user:pass@localhost/db").unwrap()
     }
 
-    fn app() -> Router {
-        Router::new()
+    fn app_with_auth() -> Router {
+        use crate::middleware::auth::AuthenticatedUser;
+        
+        let app = Router::new()
             .route("/refresh_tokens", post(create_refresh_token))
-            .with_state(dummy_pool())
+            .with_state(dummy_pool());
+            
+        let layer = ServiceBuilder::new()
+            .layer(Extension(AuthenticatedUser(Uuid::nil())));
+            
+        app.layer(layer)
     }
 
     #[tokio::test]
     async fn test_create_refresh_token_returns_500_on_db_error() {
         let token = json!({
             "id": Uuid::new_v4(),
-            "user_id": Uuid::new_v4(),
+            "user_id": Uuid::nil(),
             "token": "sometokenstring",
             "expires_at": Utc::now(),
             "created_at": Utc::now()
@@ -259,7 +318,7 @@ mod tests {
             .header("content-type", "application/json")
             .body(Body::from(token.to_string()))
             .unwrap();
-        let res = app().oneshot(req).await.unwrap();
+        let res = app_with_auth().oneshot(req).await.unwrap();
         // Since the dummy pool is not connected, this should return 500
         assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }

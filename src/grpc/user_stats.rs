@@ -1,3 +1,4 @@
+use std::convert::TryFrom;
 use tonic::{Request, Response, Status};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -213,15 +214,26 @@ impl UserStatsService for UserStatsServiceImpl {
             prost_types::Timestamp { seconds: ts.as_secs() as i64, nanos: ts.subsec_nanos() as i32 }
         });
         
+        let total_connections = u32::try_from(metrics.total_connections)
+            .map_err(|_| Status::internal("total_connections does not fit in u32"))?;
+        let active_connections = u32::try_from(metrics.active_connections)
+            .map_err(|_| Status::internal("active_connections does not fit in u32"))?;
+        let available_connections = u32::try_from(metrics.available_connections)
+            .map_err(|_| Status::internal("available_connections does not fit in u32"))?;
+        let connection_errors = u64::try_from(metrics.connection_errors)
+            .map_err(|_| Status::internal("connection_errors does not fit in u64"))?;
+        let health_check_failures = u64::try_from(metrics.health_check_failures)
+            .map_err(|_| Status::internal("health_check_failures does not fit in u64"))?;
+
         let response = GetConnectionPoolMetricsResponse {
-            total_connections: metrics.total_connections as u32,
-            active_connections: metrics.active_connections as u32,
-            available_connections: metrics.available_connections as u32,
-            connection_errors: metrics.connection_errors as u64,
-            health_check_failures: metrics.health_check_failures as u64,
+            total_connections,
+            active_connections,
+            available_connections,
+            connection_errors,
+            health_check_failures,
             last_health_check,
         };
-        
+
         let duration = start_time.elapsed();
         info!(
             total_connections = metrics.total_connections,
@@ -229,7 +241,7 @@ impl UserStatsService for UserStatsServiceImpl {
             duration_ms = duration.as_millis(),
             "gRPC GetConnectionPoolMetrics completed"
         );
-        
+
         Ok(Response::new(response))
     }
 }

@@ -10,6 +10,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone)]
 pub struct ConnectionPoolMetrics {
     pub total_connections: usize,
+    pub healthy_connections: usize,
     pub active_connections: usize,
     pub available_connections: usize,
     pub connection_errors: u64,
@@ -21,6 +22,7 @@ impl Default for ConnectionPoolMetrics {
     fn default() -> Self {
         Self {
             total_connections: 0,
+            healthy_connections: 0,
             active_connections: 0,
             available_connections: 0,
             connection_errors: 0,
@@ -280,6 +282,7 @@ impl GrpcConnectionPool {
         let healthy_count = connections.iter().filter(|c| c.is_healthy).count();
         
         metrics.total_connections = connections.len();
+        metrics.healthy_connections = healthy_count;
         let available = self.semaphore.available_permits();
         metrics.active_connections = self.max_connections.saturating_sub(available);
         metrics.available_connections = available;

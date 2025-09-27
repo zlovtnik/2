@@ -14,8 +14,12 @@ if [ ! -f "$BUILD_DIR/$EXECUTABLE" ]; then
   exit 1
 fi
 
-# Clean prod directory
-rm -rf "$PROD_DIR"/*
+
+# Ensure prod directory exists
+mkdir -p "$PROD_DIR"
+# Clean prod directory by removing and recreating it
+rm -rf "$PROD_DIR"
+mkdir -p "$PROD_DIR"
 
 # Copy the executable
 cp "$BUILD_DIR/$EXECUTABLE" "$PROD_DIR/"

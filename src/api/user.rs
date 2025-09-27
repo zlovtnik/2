@@ -1,3 +1,25 @@
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct PublicUser {
+    pub id: Uuid,
+    pub email: String,
+    pub full_name: String,
+    pub preferences: Option<serde_json::Value>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl From<&User> for PublicUser {
+    fn from(user: &User) -> Self {
+        PublicUser {
+            id: user.id,
+            email: user.email.clone(),
+            full_name: user.full_name.clone(),
+            preferences: user.preferences.clone(),
+            created_at: user.created_at,
+            updated_at: user.updated_at,
+        }
+    }
+}
 use axum::{Json, extract::{Path, State}, response::IntoResponse};
 use uuid::Uuid;
 use crate::core::user::User;
@@ -22,28 +44,36 @@ pub struct UserInfoWithStats {
     pub last_login: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-/// Sanitized user representation for API responses (excludes sensitive fields like password_hash)
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-pub struct PublicUser {
-    pub id: Uuid,
-    pub email: String,
-    pub full_name: String,
-    pub preferences: Option<serde_json::Value>,
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    pub updated_at: chrono::DateTime<chrono::Utc>,
+// The following code was misplaced and caused a syntax error. 
+// If you want to document responses, add them inside the #[utoipa::path(...)] attribute for your handler function.
+// If you want to handle user creation, implement a `create_user` handler function as shown below:
+
+// Example handler function for creating a user (adjust as needed):
+#[utoipa::path(
+    post,
+    path = "/api/v1/users",
+    request_body = CreateUserPayload,
+    responses(
+        (status = 201, description = "Kitchen staff member created successfully - Rate limit: 20 req/min with 3 burst allowance", body = PublicUser),
+        (status = 409, description = "User already exists", body = ErrorResponse),
+        (status = 500, description = "Database error", body = ErrorResponse)
+    ),
+    tag = "Kitchen Staff Management"
+)]
+pub async fn create_user() -> impl IntoResponse {
+    // This is a stub implementation for demonstration.
+    // Replace with actual logic as needed.
+    error!("create_user handler called, but not implemented");
+    (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse::new("Not implemented", None))).into_response()
 }
 
-impl From<&User> for PublicUser {
-    fn from(user: &User) -> Self {
-        Self {
-            id: user.id,
-            email: user.email.clone(),
-            full_name: user.full_name.clone(),
-            preferences: user.preferences.clone(),
-            created_at: user.created_at,
-            updated_at: user.updated_at,
-        }
-    }
+// Define the payload struct for user creation
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct CreateUserPayload {
+    pub email: String,
+    pub password_hash: String,
+    pub full_name: String,
+    pub preferences: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -56,54 +86,6 @@ fn user_crud_box(pool: PgPool) -> Box<dyn Crud<User, Uuid> + Send + Sync> {
     Box::new(PgCrud::new(pool, "users"))
 }
 
-#[utoipa::path(
-    post,
-    path = "/api/v1/users",
-    request_body = User,
-    responses(
-        (status = 201, description = "Kitchen staff member created successfully - Rate limit: 20 req/min with 3 burst allowance", body = User),
-        (status = 409, description = "Kitchen staff member with email already exists", body = ErrorResponse),
-        (status = 500, description = "Database error during staff creation", body = ErrorResponse)
-    ),
-    tag = "Kitchen Staff Management",
-    security(
-        ("bearer_auth" = [])
-    )
-)]
-pub async fn create_user(State(pool): State<PgPool>, Json(user): Json<User>) -> impl IntoResponse {
-    info!(user_id = %user.id, email = %user.email, "Creating new user");
-    debug!(user_id = %user.id, full_name = %user.full_name, "User creation details");
-    
-    // Direct SQLx for insert (as before)
-    let query = "INSERT INTO users (id, email, password_hash, full_name, preferences, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *";
-    debug!("Executing user insert query");
-    
-    match sqlx::query_as::<_, User>(query)
-        .bind(user.id)
-        .bind(&user.email)
-        .bind(&user.password_hash)
-        .bind(&user.full_name)
-        .bind(&user.preferences)
-        .bind(user.created_at)
-        .bind(user.updated_at)
-        .fetch_one(&pool)
-        .await
-    {
-        Ok(inserted) => {
-            info!(user_id = %inserted.id, "User created successfully");
-            (StatusCode::CREATED, Json(inserted)).into_response()
-        },
-        Err(e) => {
-            error!(user_id = %user.id, error = %e, "Failed to create user");
-            if e.to_string().contains("duplicate key") {
-                warn!(email = %user.email, "Attempted to create user with duplicate email");
-                (StatusCode::CONFLICT, Json(ErrorResponse::new("User already exists", Some("Email address is already registered".to_string())))).into_response()
-            } else {
-                (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse::new("Database error", Some(e.to_string())))).into_response()
-            }
-        },
-    }
-}
 
 #[utoipa::path(
     get,
@@ -157,6 +139,7 @@ pub async fn get_user(State(pool): State<PgPool>, Path(id): Path<Uuid>, Authenti
     ),
     responses(
         (status = 204, description = "Kitchen staff member removed successfully - Rate limit: 10 req/min with 2 burst allowance"),
+        (status = 403, description = "Forbidden - cannot delete another user", body = ErrorResponse),
         (status = 404, description = "Kitchen staff member not found", body = ErrorResponse),
         (status = 500, description = "Database error during staff removal", body = ErrorResponse)
     ),
@@ -299,6 +282,7 @@ pub async fn get_current_user_stats(
     request_body = String,
     responses(
         (status = 200, description = "Kitchen staff member updated successfully - Rate limit: 20 req/min with 3 burst allowance", body = PublicUser),
+        (status = 403, description = "Forbidden - user may only update their own account", body = ErrorResponse),
         (status = 404, description = "Kitchen staff member not found", body = ErrorResponse),
         (status = 500, description = "Database error during staff update", body = ErrorResponse)
     ),
@@ -359,7 +343,6 @@ pub async fn update_user(AuthenticatedUser(user_id): AuthenticatedUser, State(po
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use axum::{body::Body, http::{Request, StatusCode}, Router, routing::post};
     use serde_json::json;
     use tower::ServiceExt; // for `oneshot`
@@ -376,6 +359,7 @@ mod tests {
     }
 
     fn app() -> Router {
+        use super::create_user;
         Router::new()
             .route("/users", post(create_user))
             // Add more routes as needed

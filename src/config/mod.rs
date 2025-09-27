@@ -48,7 +48,7 @@ pub fn load() -> Config {
     
     info!(
         server_port = config.server_port,
-        grpc_upstream_endpoint = config.grpc_upstream_endpoint,
+        grpc_upstream_endpoint = config.grpc_upstream_endpoint.as_str(),
         grpc_connection_pool_size = config.grpc_connection_pool_size,
         grpc_connection_timeout_secs = config.grpc_connection_timeout_secs,
         grpc_health_check_interval_secs = config.grpc_health_check_interval_secs,

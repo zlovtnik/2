@@ -166,33 +166,52 @@ impl OpenApiValidator {
     fn validate_schemas(&self, result: &mut ValidationResult) -> Result<(), DocumentationError> {
         if let Some(components) = &self.spec.components {
             let schemas = &components.schemas;
+            let spec_json = serde_json::to_value(&self.spec)
+                .map_err(|e| DocumentationError::SchemaValidationFailed {
+                    schema: "spec".to_string(),
+                    error: e.to_string(),
+                })?;
+
+            let mut referenced_schemas = HashSet::new();
+            collect_schema_references(&spec_json, &mut referenced_schemas);
+
             if schemas.is_empty() {
-                result.warnings.push("OpenAPI components present but no schemas defined; skipping schema reference checks".to_string());
-            } else {
-                let spec_json = serde_json::to_value(&self.spec)
-                    .map_err(|e| DocumentationError::SchemaValidationFailed {
-                        schema: "spec".to_string(),
-                        error: e.to_string(),
-                    })?;
-
-                let mut referenced_schemas = HashSet::new();
-                collect_schema_references(&spec_json, &mut referenced_schemas);
-
-                // Check that all referenced schemas are defined (deterministic order)
-                let mut referenced_sorted: Vec<&String> = referenced_schemas.iter().collect();
-                referenced_sorted.sort();
-                for referenced in referenced_sorted {
-                    if !schemas.contains_key(referenced) {
-                        result.schema_errors.push(format!("Referenced schema '{}' is not defined", referenced));
+                if referenced_schemas.is_empty() {
+                    result.warnings.push(
+                        "OpenAPI components present but no schemas defined".to_string(),
+                    );
+                } else {
+                    let mut referenced_sorted: Vec<&String> =
+                        referenced_schemas.iter().collect();
+                    referenced_sorted.sort();
+                    for referenced in referenced_sorted {
+                        result
+                            .schema_errors
+                            .push(format!("Referenced schema '{}' is not defined", referenced));
                         result.success = false;
                     }
                 }
+                return Ok(());
+            }
 
-                // Warn about unused schemas
-                for (schema_name, _) in schemas {
-                    if !referenced_schemas.contains(schema_name) {
-                        result.warnings.push(format!("Schema '{}' is defined but not referenced", schema_name));
-                    }
+            // Check that all referenced schemas are defined (deterministic order)
+            let mut referenced_sorted: Vec<&String> = referenced_schemas.iter().collect();
+            referenced_sorted.sort();
+            for referenced in referenced_sorted {
+                if !schemas.contains_key(referenced) {
+                    result
+                        .schema_errors
+                        .push(format!("Referenced schema '{}' is not defined", referenced));
+                    result.success = false;
+                }
+            }
+
+            // Warn about unused schemas
+            for (schema_name, _) in schemas {
+                if !referenced_schemas.contains(schema_name) {
+                    result
+                        .warnings
+                        .push(format!("Schema '{}' is defined but not referenced", schema_name));
                 }
             }
         }

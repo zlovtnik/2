@@ -106,11 +106,22 @@ where
         let headers = &parts.headers;
         let token = match headers.get(AUTHORIZATION)
             .and_then(|h| h.to_str().ok())
-            .and_then(|h| h.strip_prefix("Bearer "))
+            .and_then(|raw| {
+                let mut parts = raw.split_whitespace();
+                match (parts.next(), parts.next(), parts.next()) {
+                    (Some(scheme), Some(token), None) if scheme.eq_ignore_ascii_case("Bearer") => {
+                        Some(token.to_string())
+                    }
+                    _ => None,
+                }
+            })
         {
-            Some(t) => t.to_string(),
+            Some(t) => t,
             None => {
-                return Err(AuthError::Standard(ErrorResponse::new("Invalid credentials", Some("Missing Authorization header".to_string()))));
+                return Err(AuthError::Standard(ErrorResponse::new(
+                    "Invalid credentials",
+                    Some("Missing or invalid Authorization header".to_string()),
+                )));
             }
         };
 

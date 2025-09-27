@@ -20,7 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let out_dir = std::env::var("OUT_DIR").unwrap();
     tonic_build::configure()
         .file_descriptor_set_path(format!("{}/user_stats.bin", out_dir))
-        .compile(&["proto/user_stats.proto"], &["proto"])?;
+        .compile(&["proto/user_stats/user_stats.proto"], &["proto"])?;
 
     // Documentation validation during build - only if explicitly enabled
     if std::env::var("ENABLE_DOC_VALIDATION").is_ok() {
@@ -169,9 +169,11 @@ fn run_documentation_tests() -> Result<(), Box<dyn std::error::Error>> {
     // Only run doc tests during build validation
     // Skip integration tests to avoid requiring database setup during build
 
+
     println!("cargo:warning=Running documentation tests...");
 
-    let mut command = create_cargo_command("cargo", &["test", "--doc", "--quiet"]);
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
+    let mut command = create_cargo_command(&cargo, &["test", "--doc", "--quiet"]);
     let output = command.output()?;
 
     if !output.status.success() {

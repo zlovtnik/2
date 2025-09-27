@@ -24,7 +24,9 @@ pub async fn create_test_app() -> Router {
     env::set_var("JWT_SECRET", "test-jwt-secret-not-for-production");
 
     let db_url = env::var("APP_DATABASE_URL").expect("APP_DATABASE_URL must be set");
-    let pool = PgPool::connect_lazy(&db_url).expect("Failed to create DB pool");
+    let pool = PgPool::connect(&db_url)
+        .await
+        .expect("Failed to connect to DB eagerly");
 
     app(pool)
 }
