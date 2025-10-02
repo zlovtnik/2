@@ -31,6 +31,7 @@ use crate::api::auth::ErrorResponse;
 use tracing::{info, warn, error, debug};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
+use crate::middleware::validation::InputSanitizer;
 
 #[derive(Debug, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct UserInfoWithStats {
@@ -48,7 +49,6 @@ pub struct UserInfoWithStats {
 // If you want to document responses, add them inside the #[utoipa::path(...)] attribute for your handler function.
 // If you want to handle user creation, implement a `create_user` handler function as shown below:
 
-// Example handler function for creating a user (adjust as needed):
 #[utoipa::path(
     post,
     path = "/api/v1/users",
@@ -60,30 +60,28 @@ pub struct UserInfoWithStats {
     ),
     tag = "Kitchen Staff Management"
 )]
-pub async fn create_user() -> impl IntoResponse {
-    // This is a stub implementation for demonstration.
-    // Replace with actual logic as needed.
+pub async fn create_user(State(pool): State<PgPool>, Json(mut payload): Json<CreateUserPayload>) -> impl IntoResponse {
+    payload.sanitize();
+    let pool_closed = pool.is_closed();
+    debug!(pool_closed, user_email = %payload.email, "create_user handler invoked but not implemented");
     error!("create_user handler called, but not implemented");
-    (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse::new("Not implemented", None))).into_response()
+    (StatusCode::NOT_IMPLEMENTED, Json(ErrorResponse::new("Not implemented", None))).into_response()
 }
 
 // Define the payload struct for user creation
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CreateUserPayload {
     pub email: String,
-    pub password_hash: String,
+    pub password: String,
     pub full_name: String,
     pub preferences: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-pub struct UserWithRequesterId {
-    pub user: PublicUser,
-    pub requester_id: Uuid,
-}
-
-fn user_crud_box(pool: PgPool) -> Box<dyn Crud<User, Uuid> + Send + Sync> {
-    Box::new(PgCrud::new(pool, "users"))
+impl CreateUserPayload {
+    fn sanitize(&mut self) {
+        self.email = InputSanitizer::sanitize_email(&self.email);
+        self.full_name = InputSanitizer::sanitize_text(&self.full_name);
+    }
 }
 
 
@@ -94,7 +92,7 @@ fn user_crud_box(pool: PgPool) -> Box<dyn Crud<User, Uuid> + Send + Sync> {
         ("id" = Uuid, Path, description = "Kitchen staff member ID to retrieve")
     ),
     responses(
-        (status = 200, description = "Kitchen staff member found - Rate limit: 50 req/min with 10 burst allowance", body = UserWithRequesterId),
+        (status = 200, description = "Kitchen staff member found - Rate limit: 50 req/min with 10 burst allowance", body = PublicUser),
         (status = 404, description = "Kitchen staff member not found", body = ErrorResponse),
         (status = 401, description = "Kitchen authentication required"),
         (status = 500, description = "Database error", body = ErrorResponse)
@@ -105,27 +103,25 @@ fn user_crud_box(pool: PgPool) -> Box<dyn Crud<User, Uuid> + Send + Sync> {
     )
 )]
 pub async fn get_user(State(pool): State<PgPool>, Path(id): Path<Uuid>, AuthenticatedUser(user_id): AuthenticatedUser) -> impl IntoResponse {
-    info!(requested_user_id = %id, authenticated_user_id = %user_id, "Getting user");
+    info!(requested_user_id = %id.to_string(), authenticated_user_id = %user_id.to_string(), "Getting user");
     debug!("Creating user CRUD instance");
     
-    let crud = user_crud_box(pool);
+    let crud = PgCrud::new(pool, "users");
     debug!(user_id = %id, "Executing user read query");
     
-    // For demo: return the authenticated user_id and the requested user
     match crud.read(id).await {
         Ok(Some(user)) => {
-            info!(user_id = %id, authenticated_user_id = %user_id, "User retrieved successfully");
+            info!(user_id = %id.to_string(), authenticated_user_id = %user_id.to_string(), "User retrieved successfully");
             debug!(user_email = "[redacted]", "User details retrieved");
             let public_user = PublicUser::from(&user);
-            let resp = UserWithRequesterId { user: public_user, requester_id: user_id };
-            (StatusCode::OK, Json(resp)).into_response()
+            (StatusCode::OK, Json(public_user)).into_response()
         },
         Ok(None) => {
-            warn!(user_id = %id, authenticated_user_id = %user_id, "User not found");
+            warn!(user_id = %id.to_string(), authenticated_user_id = %user_id.to_string(), "User not found");
             (StatusCode::NOT_FOUND, Json(ErrorResponse::new("User not found", None))).into_response()
         },
         Err(e) => {
-            error!(user_id = %id, authenticated_user_id = %user_id, error = %e, "Failed to retrieve user");
+            error!(user_id = %id.to_string(), authenticated_user_id = %user_id.to_string(), error = %e, "Failed to retrieve user");
             (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse::new("Database error", Some(e.to_string())))).into_response()
         },
     }
@@ -143,36 +139,34 @@ pub async fn get_user(State(pool): State<PgPool>, Path(id): Path<Uuid>, Authenti
         (status = 404, description = "Kitchen staff member not found", body = ErrorResponse),
         (status = 500, description = "Database error during staff removal", body = ErrorResponse)
     ),
-    tag = "Kitchen Staff Management",
     security(
         ("bearer_auth" = [])
     )
 )]
 pub async fn delete_user(AuthenticatedUser(user_id): AuthenticatedUser, State(pool): State<PgPool>, Path(id): Path<Uuid>) -> impl IntoResponse {
-    info!(user_id = %id, authenticated_user_id = %user_id, "Deleting user");
-
+    info!(user_id = %id.to_string(), authenticated_user_id = %user_id.to_string(), "Deleting user");
     // Authorization: allow if requester is the same user. Admin role checks
     // are not implemented yet; extend this block if role claims are added.
     if user_id != id {
-        warn!(requested_id = %id, authenticated_user_id = %user_id, "Unauthorized delete attempt - users may only delete their own account");
+        warn!(requested_id = %id.to_string(), authenticated_user_id = %user_id.to_string(), "Unauthorized delete attempt - users may only delete their own account");
         return (StatusCode::FORBIDDEN, Json(ErrorResponse::new("Forbidden", Some("You are not allowed to delete this user".to_string())))).into_response();
     }
     debug!("Creating user CRUD instance for deletion");
     
-    let crud = user_crud_box(pool);
-    debug!(user_id = %id, "Executing user delete query");
+    let crud = PgCrud::new(pool, "users");
+    debug!(user_id = %id.to_string(), "Executing user delete query");
     
     match crud.delete(id).await {
         Ok(affected) if affected > 0 => {
-            info!(user_id = %id, affected_rows = affected, "User deleted successfully");
+            info!(user_id = %id.to_string(), affected_rows = affected, "User deleted successfully");
             (StatusCode::NO_CONTENT, "").into_response()
         },
         Ok(affected) => {
-            warn!(user_id = %id, affected_rows = affected, "User not found for deletion");
+            warn!(user_id = %id.to_string(), affected_rows = affected, "User not found for deletion");
             (StatusCode::NOT_FOUND, Json(ErrorResponse::new("User not found", None))).into_response()
         },
         Err(e) => {
-            error!(user_id = %id, error = %e, "Failed to delete user");
+            error!(user_id = %id.to_string(), error = %e, "Failed to delete user");
             (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse::new("Database error", Some(e.to_string())))).into_response()
         },
     }
@@ -193,25 +187,25 @@ pub async fn delete_user(AuthenticatedUser(user_id): AuthenticatedUser, State(po
     )
 )]
 pub async fn get_current_user(AuthenticatedUser(user_id): AuthenticatedUser, State(pool): State<PgPool>) -> impl IntoResponse {
-    info!(user_id = %user_id, "Getting current user profile");
+    info!(user_id = %user_id.to_string(), "Getting current user profile");
     debug!("Creating user CRUD instance for current user");
     
-    let crud = user_crud_box(pool);
-    debug!(user_id = %user_id, "Executing current user read query");
+    let crud = PgCrud::new(pool, "users");
+    debug!(user_id = %user_id.to_string(), "Executing current user read query");
     
     match crud.read(user_id).await {
         Ok(Some(user)) => {
-            info!(user_id = %user_id, "Current user profile retrieved successfully");
+            info!(user_id = %user_id.to_string(), "Current user profile retrieved successfully");
             debug!(user_email = "[redacted]", full_name = "[redacted]", "Current user details");
             let public_user = PublicUser::from(&user);
             (StatusCode::OK, Json(public_user)).into_response()
         },
         Ok(None) => {
-            warn!(user_id = %user_id, "Current user not found in database");
+            warn!(user_id = %user_id.to_string(), "Current user not found in database");
             (StatusCode::NOT_FOUND, Json(ErrorResponse::new("User not found", None))).into_response()
         },
         Err(e) => {
-            error!(user_id = %user_id, error = %e, "Failed to retrieve current user");
+            error!(user_id = %user_id.to_string(), error = %e, "Failed to retrieve current user");
             (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse::new("Database error", Some(e.to_string())))).into_response()
         },
     }
@@ -340,17 +334,12 @@ pub async fn update_user(AuthenticatedUser(user_id): AuthenticatedUser, State(po
         },
     }
 }
-
 #[cfg(test)]
 mod tests {
     use axum::{body::Body, http::{Request, StatusCode}, Router, routing::post};
     use serde_json::json;
-    use tower::ServiceExt; // for `oneshot`
     use sqlx::PgPool;
-    
-    
-    use chrono::Utc;
-    use uuid::Uuid;
+    use tower::ServiceExt; // for `oneshot`
 
     // Dummy pool for demonstration (not a real DB connection)
     fn dummy_pool() -> PgPool {
@@ -367,15 +356,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_create_user_returns_500_on_db_error() {
+    async fn test_create_user_returns_501_not_implemented() {
         let user = json!({
-            "id": Uuid::new_v4(),
             "email": "test@example.com",
-            "password_hash": "hash",
+            "password": "StrongPass123!",
             "full_name": "Test User",
-            "preferences": null,
-            "created_at": Utc::now(),
-            "updated_at": Utc::now()
+            "preferences": null
         });
         let req = Request::builder()
             .method("POST")
@@ -384,7 +370,6 @@ mod tests {
             .body(Body::from(user.to_string()))
             .unwrap();
         let res = app().oneshot(req).await.unwrap();
-        // Since the dummy pool is not connected, this should return 500
-        assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(res.status(), StatusCode::NOT_IMPLEMENTED);
     }
-} 
+}

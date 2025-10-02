@@ -1,7 +1,7 @@
 use axum::{Json, extract::{Path, State}, response::IntoResponse};
 use uuid::Uuid;
 use crate::core::refresh_token::RefreshToken;
-use crate::infrastructure::database::{Crud, PgCrud, UpdatableCrud};
+use crate::infrastructure::database::{Crud, PgCrud};
 use sqlx::{PgPool, Row};
 use axum::http::StatusCode;
 use crate::api::auth::ErrorResponse;
@@ -157,14 +157,18 @@ pub async fn delete_refresh_token(
                 Ok(id) => id,
                 Err(e) => {
                     error!(error = %e, "Failed to get user_id from row");
-                    let _ = tx.rollback().await;
+                    if let Err(rollback_err) = tx.rollback().await {
+                        error!(token_id = %id, auth_user_id = %auth_user_id, error = %rollback_err, "Failed to rollback transaction after ownership fetch error");
+                    }
                     return (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some("Failed to process token ownership".to_string()))).into_response();
                 }
             };
             if owner_id != auth_user_id {
                 warn!(token_id = %id, owner_id = %owner_id, auth_user_id = %auth_user_id, "Authenticated user is not the owner of the refresh token");
                 // Rollback transaction
-                let _ = tx.rollback().await;
+                if let Err(rollback_err) = tx.rollback().await {
+                    error!(token_id = %id, auth_user_id = %auth_user_id, error = %rollback_err, "Failed to rollback transaction after ownership mismatch");
+                }
                 return (StatusCode::FORBIDDEN, ErrorResponse::new("Forbidden", Some("You are not the owner of this token".to_string()))).into_response();
             }
             // Owner matches, proceed to delete
@@ -175,29 +179,43 @@ pub async fn delete_refresh_token(
                 .await
             {
                 Ok(res) if res.rows_affected() > 0 => {
-                    let _ = tx.commit().await;
+                    if let Err(commit_err) = tx.commit().await {
+                        error!(token_id = %id, auth_user_id = %auth_user_id, error = %commit_err, "Failed to commit refresh token delete transaction");
+                        return (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some(commit_err.to_string()))).into_response();
+                    }
                     info!(token_id = %id, auth_user_id = %auth_user_id, affected_rows = res.rows_affected(), "Refresh token deleted successfully");
                     (StatusCode::NO_CONTENT, "").into_response()
                 }
                 Ok(_) => {
-                    let _ = tx.rollback().await;
+                    if let Err(rollback_err) = tx.rollback().await {
+                        error!(token_id = %id, auth_user_id = %auth_user_id, error = %rollback_err, "Failed to rollback transaction after token vanished during delete");
+                        return (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some(rollback_err.to_string()))).into_response();
+                    }
                     warn!(token_id = %id, auth_user_id = %auth_user_id, "Token disappeared before delete");
                     (StatusCode::NOT_FOUND, ErrorResponse::new("Token not found", None)).into_response()
                 }
                 Err(e) => {
-                    let _ = tx.rollback().await;
+                    if let Err(rollback_err) = tx.rollback().await {
+                        error!(token_id = %id, auth_user_id = %auth_user_id, error = %rollback_err, "Failed to rollback transaction after delete error");
+                    }
                     error!(token_id = %id, auth_user_id = %auth_user_id, error = %e, "Failed to delete refresh token");
                     (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some(e.to_string()))).into_response()
                 }
             }
         }
         Ok(None) => {
-            let _ = tx.rollback().await;
+            if let Err(rollback_err) = tx.rollback().await {
+                error!(token_id = %id, auth_user_id = %auth_user_id, error = %rollback_err, "Failed to rollback transaction after missing token during delete");
+                return (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some(rollback_err.to_string()))).into_response();
+            }
             warn!(token_id = %id, auth_user_id = %auth_user_id, "Token not found for delete");
             (StatusCode::NOT_FOUND, ErrorResponse::new("Token not found", None)).into_response()
         }
         Err(e) => {
-            let _ = tx.rollback().await;
+            if let Err(rollback_err) = tx.rollback().await {
+                error!(token_id = %id, auth_user_id = %auth_user_id, error = %rollback_err, "Failed to rollback transaction after select error");
+                return (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some(rollback_err.to_string()))).into_response();
+            }
             error!(token_id = %id, auth_user_id = %auth_user_id, error = %e, "Failed to select refresh token for delete");
             (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some(e.to_string()))).into_response()
         }
@@ -223,51 +241,97 @@ pub async fn delete_refresh_token(
         ("bearer_auth" = [])
     )
 )]
-pub async fn update_refresh_token(AuthenticatedUser(auth_user_id): AuthenticatedUser, State(pool): State<PgPool>, Path(id): Path<Uuid>, Json(new_token): Json<String>) -> impl IntoResponse {
-    info!(token_id = %id, auth_user_id = %auth_user_id, "Updating refresh token");
-    debug!("Creating refresh token CRUD instance for update");
+pub async fn update_refresh_token(
+    AuthenticatedUser(auth_user_id): AuthenticatedUser,
+    State(pool): State<PgPool>,
+    Path(id): Path<Uuid>,
+    Json(new_token): Json<String>,
+) -> impl IntoResponse {
+    info!(token_id = %id, auth_user_id = %auth_user_id, "Updating refresh token with transactional ownership check");
 
-    let crud: PgCrud<RefreshToken> = PgCrud::new(pool, "refresh_tokens");
-    debug!(token_id = %id, "Checking if refresh token exists before update");
+    // Start transaction to avoid TOCTOU during ownership verification and update
+    let mut tx = match pool.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            error!(token_id = %id, auth_user_id = %auth_user_id, error = %e, "Failed to start transaction for refresh token update");
+            return (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some(e.to_string()))).into_response();
+        }
+    };
 
-    // Fetch existing token so we can verify ownership before applying changes
-    match crud.read(id).await {
-        Ok(Some(existing)) => {
-            info!(token_id = %id, user_id = %existing.user_id, "Refresh token found, verifying ownership");
-            if existing.user_id != auth_user_id {
-                warn!(token_id = %id, owner_id = %existing.user_id, auth_user_id = %auth_user_id, "Authenticated user is not the owner of the refresh token");
+    let select_sql = "SELECT user_id FROM refresh_tokens WHERE id = $1 FOR UPDATE";
+    match sqlx::query(select_sql)
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+    {
+        Ok(Some(row)) => {
+            let owner_id: Uuid = match row.try_get("user_id") {
+                Ok(id) => id,
+                Err(e) => {
+                    error!(token_id = %id, auth_user_id = %auth_user_id, error = %e, "Failed to read owner id during token update");
+                    if let Err(rollback_err) = tx.rollback().await {
+                        error!(token_id = %id, auth_user_id = %auth_user_id, error = %rollback_err, "Failed to rollback transaction after ownership fetch error in update");
+                    }
+                    return (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some("Failed to process token ownership".to_string()))).into_response();
+                }
+            };
+
+            if owner_id != auth_user_id {
+                warn!(token_id = %id, owner_id = %owner_id, auth_user_id = %auth_user_id, "Authenticated user is not the owner of the refresh token");
+                if let Err(rollback_err) = tx.rollback().await {
+                    error!(token_id = %id, auth_user_id = %auth_user_id, error = %rollback_err, "Failed to rollback transaction after ownership mismatch in update");
+                }
                 return (StatusCode::FORBIDDEN, ErrorResponse::new("Forbidden", Some("You are not the owner of this token".to_string()))).into_response();
             }
 
-            // Owner matches; proceed to update
-            let update_fn = |mut t: RefreshToken| {
-                t.token = new_token.clone();
-                t
-            };
-            debug!(token_id = %id, "Executing refresh token update");
-            match UpdatableCrud::update(&crud, id, update_fn).await {
+            let update_sql = "UPDATE refresh_tokens SET token = $1 WHERE id = $2 RETURNING *";
+            match sqlx::query_as::<_, RefreshToken>(update_sql)
+                .bind(&new_token)
+                .bind(id)
+                .fetch_optional(&mut *tx)
+                .await
+            {
                 Ok(Some(updated)) => {
+                    if let Err(e) = tx.commit().await {
+                        error!(token_id = %id, auth_user_id = %auth_user_id, error = %e, "Failed to commit refresh token update transaction");
+                        return (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some(e.to_string()))).into_response();
+                    }
                     info!(token_id = %id, user_id = %updated.user_id, "Refresh token updated successfully");
                     (StatusCode::OK, Json(updated)).into_response()
-                },
+                }
                 Ok(None) => {
-                    warn!(token_id = %id, "Refresh token not found during update operation");
+                    if let Err(rollback_err) = tx.rollback().await {
+                        error!(token_id = %id, auth_user_id = %auth_user_id, error = %rollback_err, "Failed to rollback transaction after token disappeared during update");
+                        return (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some(rollback_err.to_string()))).into_response();
+                    }
+                    warn!(token_id = %id, auth_user_id = %auth_user_id, "Refresh token disappeared during update");
                     (StatusCode::NOT_FOUND, ErrorResponse::new("Token not found", None)).into_response()
-                },
+                }
                 Err(e) => {
-                    error!(token_id = %id, error = %e, "Failed to update refresh token");
+                    if let Err(rollback_err) = tx.rollback().await {
+                        error!(token_id = %id, auth_user_id = %auth_user_id, error = %rollback_err, "Failed to rollback transaction after update error");
+                    }
+                    error!(token_id = %id, auth_user_id = %auth_user_id, error = %e, "Failed to update refresh token");
                     (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some(e.to_string()))).into_response()
-                },
+                }
             }
         }
         Ok(None) => {
-            warn!(token_id = %id, "Refresh token not found for update");
+            if let Err(rollback_err) = tx.rollback().await {
+                error!(token_id = %id, auth_user_id = %auth_user_id, error = %rollback_err, "Failed to rollback transaction after missing token during update");
+                return (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some(rollback_err.to_string()))).into_response();
+            }
+            warn!(token_id = %id, auth_user_id = %auth_user_id, "Refresh token not found for update");
             (StatusCode::NOT_FOUND, ErrorResponse::new("Token not found", None)).into_response()
-        },
+        }
         Err(e) => {
-            error!(token_id = %id, error = %e, "Failed to check refresh token existence before update");
+            if let Err(rollback_err) = tx.rollback().await {
+                error!(token_id = %id, auth_user_id = %auth_user_id, error = %rollback_err, "Failed to rollback transaction after select error in update");
+                return (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some(rollback_err.to_string()))).into_response();
+            }
+            error!(token_id = %id, auth_user_id = %auth_user_id, error = %e, "Failed to select refresh token for update");
             (StatusCode::INTERNAL_SERVER_ERROR, ErrorResponse::new("Database error", Some(e.to_string()))).into_response()
-        },
+        }
     }
 }
 
@@ -275,11 +339,13 @@ pub async fn update_refresh_token(AuthenticatedUser(auth_user_id): Authenticated
 mod tests {
     use super::*;
     use axum::{
-        body::Body, 
-        http::{Request, StatusCode}, 
-        Router, 
-        routing::post
+        body::Body,
+        extract::Extension,
+        http::{Request, StatusCode},
+        routing::post,
+        Router,
     };
+    use tower::ServiceBuilder;
     use tower::ServiceExt; // for `oneshot`
     use serde_json::json;
     use chrono::Utc;

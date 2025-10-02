@@ -19,6 +19,10 @@ impl MockGrpcClient {
         Ok(Self { channel })
     }
 
+    fn from_channel(channel: Channel) -> Self {
+        Self { channel }
+    }
+
     async fn make_request(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Touch the channel so the field is read (avoid dead_code warning)
         let _ = &self.channel;
@@ -36,6 +40,10 @@ struct SimpleConnectionPool {
 
 impl SimpleConnectionPool {
     async fn new(endpoint: &str, pool_size: usize) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        if pool_size == 0 {
+            return Err("pool_size must be > 0".into());
+        }
+
         let mut connections = Vec::new();
         
         for _ in 0..pool_size {
@@ -66,20 +74,20 @@ async fn benchmark_without_pooling(endpoint: &str, num_requests: usize) -> Resul
         let client = MockGrpcClient::new(endpoint).await?;
         client.make_request().await?;
     }
-    let _elapsed = start.elapsed();
-    Ok(_elapsed)
+    let elapsed = start.elapsed();
+    Ok(elapsed)
 }
 
 async fn benchmark_with_pooling(endpoint: &str, num_requests: usize, pool_size: usize) -> Result<Duration, Box<dyn std::error::Error + Send + Sync>> {
     let start = std::time::Instant::now();
     let mut pool = SimpleConnectionPool::new(endpoint, pool_size).await?;
     for _ in 0..num_requests {
-        let _channel = pool.get_connection();
-        // Simulate using the pooled connection
-        tokio::time::sleep(Duration::from_millis(1)).await;
+        let channel = pool.get_connection().clone();
+        let client = MockGrpcClient::from_channel(channel);
+        client.make_request().await?;
     }
-    let _elapsed = start.elapsed();
-    Ok(_elapsed)
+    let elapsed = start.elapsed();
+    Ok(elapsed)
 }
 
 fn benchmark_grpc_connection_pooling(c: &mut Criterion) {
@@ -144,7 +152,7 @@ fn benchmark_connection_pool_metrics(c: &mut Criterion) {
     
     group.bench_function("metrics_collection", |b| {
         b.iter(|| {
-            let _elapsed = rt.block_on(async {
+            let elapsed = rt.block_on(async {
                 // Simulate metrics collection overhead
                 let start = std::time::Instant::now();
                 // Simulate collecting various metrics
@@ -158,7 +166,7 @@ fn benchmark_connection_pool_metrics(c: &mut Criterion) {
                 tokio::time::sleep(Duration::from_micros(10)).await;
                 start.elapsed()
             });
-            criterion::black_box(_elapsed);
+            criterion::black_box(elapsed);
         })
     });
     
@@ -174,7 +182,7 @@ fn benchmark_health_checks(c: &mut Criterion) {
     
     group.bench_function("health_check_overhead", |b| {
         b.iter(|| {
-            let _elapsed = rt.block_on(async {
+            let (elapsed, status) = rt.block_on(async {
                 let start = std::time::Instant::now();
                 // Simulate health check logic
                 let connections = vec![
@@ -186,16 +194,16 @@ fn benchmark_health_checks(c: &mut Criterion) {
                 let total_count = connections.len();
                 // Simulate some health check computation
                 tokio::time::sleep(Duration::from_micros(5)).await;
-                let _status = if healthy_count == 0 {
+                let status = if healthy_count == 0 {
                     "unhealthy"
                 } else if healthy_count < total_count {
                     "degraded"
                 } else {
                     "healthy"
                 };
-                start.elapsed()
+                (start.elapsed(), status)
             });
-            criterion::black_box(_elapsed);
+            criterion::black_box((elapsed, status));
         })
     });
     

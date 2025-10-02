@@ -3,6 +3,8 @@ use tonic::{Request, Response, Status};
 use sqlx::PgPool;
 use uuid::Uuid;
 use tracing::{info, warn, error, debug};
+use chrono::{DateTime, Utc};
+use prost_types::Timestamp;
 use crate::core::auth::verify_jwt;
 use crate::api::user::UserInfoWithStats;
 use crate::grpc::GrpcConnectionPool;
@@ -31,6 +33,15 @@ pub struct UserStatsServiceImpl {
 impl UserStatsServiceImpl {
     pub fn new(pool: PgPool, connection_pool: GrpcConnectionPool) -> Self {
         Self { pool, connection_pool }
+    }
+
+    fn chrono_to_timestamp(dt: DateTime<Utc>) -> Timestamp {
+        let seconds = dt.timestamp();
+        let nanos = dt.timestamp_subsec_nanos();
+        Timestamp {
+            seconds,
+            nanos: i32::try_from(nanos).unwrap_or(i32::MAX),
+        }
     }
 
     /// Get connection pool metrics
@@ -120,10 +131,10 @@ impl UserStatsService for UserStatsServiceImpl {
                     email: user_stats.email,
                     full_name: user_stats.full_name,
                     preferences: user_stats.preferences.map(|p| p.to_string()),
-                    created_at: user_stats.created_at.to_rfc3339(),
-                    updated_at: user_stats.updated_at.to_rfc3339(),
+                    created_at: Some(Self::chrono_to_timestamp(user_stats.created_at)),
+                    updated_at: Some(Self::chrono_to_timestamp(user_stats.updated_at)),
                     refresh_token_count: user_stats.refresh_token_count,
-                    last_login: user_stats.last_login.map(|dt| dt.to_rfc3339()),
+                    last_login: user_stats.last_login.map(Self::chrono_to_timestamp),
                 };
 
                 let duration = start_time.elapsed();
@@ -182,7 +193,11 @@ impl UserStatsService for UserStatsServiceImpl {
         let ts_now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default();
-        let timestamp = Some(prost_types::Timestamp { seconds: ts_now.as_secs() as i64, nanos: ts_now.subsec_nanos() as i32 });
+        let seconds = i64::try_from(ts_now.as_secs()).unwrap_or(i64::MAX);
+        let timestamp = Some(prost_types::Timestamp {
+            seconds,
+            nanos: ts_now.subsec_nanos() as i32,
+        });
         
         let response = HealthCheckResponse {
             status: status as i32,
@@ -211,7 +226,9 @@ impl UserStatsService for UserStatsServiceImpl {
         
         let last_health_check = metrics.last_health_check.map(|st| {
             let ts = st.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
-            prost_types::Timestamp { seconds: ts.as_secs() as i64, nanos: ts.subsec_nanos() as i32 }
+            let seconds = i64::try_from(ts.as_secs()).unwrap_or(i64::MAX);
+            let nanos = i32::try_from(ts.subsec_nanos()).unwrap_or(i32::MAX);
+            prost_types::Timestamp { seconds, nanos }
         });
         
         let total_connections = u32::try_from(metrics.total_connections)

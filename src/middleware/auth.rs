@@ -13,7 +13,7 @@ use tracing::{info, warn, error, debug};
 pub struct AuthenticatedUser(pub Uuid);
 
 #[async_trait]
-impl<S> FromRequestParts<S> for AuthenticatedUser
+impl<S> FromRequestParts<S> for AuthenticatedUser   
 where
     S: Send + Sync,
 {

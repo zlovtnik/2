@@ -28,10 +28,10 @@ message GetCurrentUserStatsResponse {
     string email = 2;
     string full_name = 3;
     optional string preferences = 4;  // JSON string, optional
-    string created_at = 5;  // ISO 8601 timestamp
-    string updated_at = 6;  // ISO 8601 timestamp
+    google.protobuf.Timestamp created_at = 5;
+    google.protobuf.Timestamp updated_at = 6;
     int64 refresh_token_count = 7;
-    optional string last_login = 8;  // ISO 8601 timestamp, optional
+    google.protobuf.Timestamp last_login = 8;
 }
 
 enum HealthStatus {

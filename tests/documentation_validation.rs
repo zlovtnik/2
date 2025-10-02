@@ -140,7 +140,8 @@ mod documentation_endpoints_tests {
     /// Test that documentation endpoints are accessible
     #[tokio::test]
     async fn test_documentation_endpoints_accessible() {
-    let app = crate::common::create_test_app().await;
+        let database_url = crate::common::test_database_url();
+        let app = crate::common::create_test_app(&database_url).await;
         
         // Start the app in the background
         let addr = SocketAddr::from(([127, 0, 0, 1], 0));
@@ -211,10 +212,12 @@ mod example_validation_tests {
     #[tokio::test]
     async fn test_authentication_examples() {
         // Set up test environment
-        env::set_var("APP_DATABASE_URL", "postgres://user:pass@localhost/postgres");
         env::set_var("JWT_SECRET", "your-super-secret-jwt-key-here");
-        
-    let app = crate::common::create_test_app().await;
+        let database_url = env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://user:pass@localhost/postgres".to_string()
+        });
+
+        let app = crate::common::create_test_app(&database_url).await;
         let addr = SocketAddr::from(([127, 0, 0, 1], 0));
         let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
         let local_addr = listener.local_addr().unwrap();
@@ -274,7 +277,8 @@ mod example_validation_tests {
     /// Test that health check examples work correctly
     #[tokio::test]
     async fn test_health_check_examples() {
-    let app = crate::common::create_test_app().await;
+        let database_url = crate::common::test_database_url();
+        let app = crate::common::create_test_app(&database_url).await;
         let addr = SocketAddr::from(([127, 0, 0, 1], 0));
         let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
         let local_addr = listener.local_addr().unwrap();

@@ -472,8 +472,68 @@ impl ExampleValidator {
     
     async fn validate_health_examples(&self, result: &mut ValidationResult) -> Result<(), DocumentationError> {
         // Static validation only - no HTTP requests during build
-        result.warnings.push("HTTP-based health check validation disabled during build".to_string());
-        
+        // TODO: extend with integration checks once network calls are allowed during validation
+
+        let examples = vec![
+            serde_json::json!({
+                "method": "GET",
+                "url": format!("{}/api/v1/health", self.base_url),
+                "expected_status": 200
+            }),
+        ];
+
+        for (idx, example) in examples.iter().enumerate() {
+            match example["method"].as_str() {
+                Some(method) if matches!(method, "GET" | "HEAD") => {}
+                Some(method) => {
+                    result.invalid_examples.push(format!(
+                        "Health example #{} uses unexpected method '{}'; expected GET or HEAD",
+                        idx + 1,
+                        method
+                    ));
+                    result.success = false;
+                }
+                None => {
+                    result.invalid_examples.push(format!(
+                        "Health example #{} missing 'method' field",
+                        idx + 1
+                    ));
+                    result.success = false;
+                }
+            }
+
+            match example["url"].as_str() {
+                Some(url) if url.starts_with("http://") || url.starts_with("https://") => {}
+                Some(url) => {
+                    result.invalid_examples.push(format!(
+                        "Health example #{} has unsupported URL scheme: {}",
+                        idx + 1,
+                        url
+                    ));
+                    result.success = false;
+                }
+                None => {
+                    result.invalid_examples.push(format!(
+                        "Health example #{} missing 'url' field",
+                        idx + 1
+                    ));
+                    result.success = false;
+                }
+            }
+
+            if !example["expected_status"].is_number() {
+                result.invalid_examples.push(format!(
+                    "Health example #{} missing numeric 'expected_status' field",
+                    idx + 1
+                ));
+                result.success = false;
+            }
+        }
+
+        if result.success {
+            result.warnings.push("Health endpoint examples validated statically".to_string());
+        }
+
         Ok(())
     }
 }

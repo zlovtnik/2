@@ -119,7 +119,7 @@ where
             Some(t) => t,
             None => {
                 return Err(AuthError::Standard(ErrorResponse::new(
-                    "Invalid credentials",
+                    "Authentication required",
                     Some("Missing or invalid Authorization header".to_string()),
                 )));
             }
@@ -221,7 +221,7 @@ impl IntoResponse for ErrorResponse {
             // Client-side validation/registration problems
             "Registration failed" => axum::http::StatusCode::BAD_REQUEST,
             // Authentication failures
-            "Invalid credentials" => axum::http::StatusCode::UNAUTHORIZED,
+            "Invalid credentials" | "Authentication required" => axum::http::StatusCode::UNAUTHORIZED,
             // Resource not found
             "User not found" | "Token not found" => axum::http::StatusCode::NOT_FOUND,
             // Conflict / already exists
@@ -714,6 +714,9 @@ mod tests {
     use std::env;
     use sqlx::postgres::PgPoolOptions;
     use std::time::Duration;
+    use chrono::Utc;
+    use jsonwebtoken::{Algorithm, EncodingKey, Header};
+    use serde::Serialize;
 
     // Create a test database connection pool
     #[allow(dead_code)]
