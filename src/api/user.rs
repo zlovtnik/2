@@ -153,7 +153,7 @@ pub async fn delete_user(AuthenticatedUser(user_id): AuthenticatedUser, State(po
     }
     debug!("Creating user CRUD instance for deletion");
     
-    let crud = PgCrud::new(pool, "users");
+    let crud: PgCrud<User> = PgCrud::new(pool, "users");
     debug!(user_id = %id.to_string(), "Executing user delete query");
     
     match crud.delete(id).await {
