@@ -1,6 +1,7 @@
 use std::process::Command;
 
-/// RAII guard for DOC_VALIDATION_IN_PROGRESS environment variable
+/// RAII guard for DOC_VALIDATION_IN_PROGRESS environment variable.
+/// SAFETY: Only use in single-threaded contexts. std::env::set_var is not thread-safe.
 struct DocValidationGuard;
 
 impl DocValidationGuard {
@@ -20,13 +21,57 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let out_dir = std::env::var("OUT_DIR").unwrap();
     tonic_build::configure()
         .file_descriptor_set_path(format!("{}/user_stats.bin", out_dir))
-        .compile(&["proto/user_stats.proto"], &["proto"])?;
+        .compile(&["proto/user_stats/user_stats.proto"], &["proto"])?;
 
     // Documentation validation during build - only if explicitly enabled
     if std::env::var("ENABLE_DOC_VALIDATION").is_ok() {
         validate_documentation_during_build()?;
     }
 
+    Ok(())
+}
+
+/// Recursively walks through a directory and emits `cargo:rerun-if-changed` directives
+/// for all regular files found. Skips hidden files and directories.
+fn walk_and_emit_rerun_directives<P: AsRef<std::path::Path>>(
+    path: P,
+) -> std::io::Result<()> {
+    let path = path.as_ref();
+    
+    // Skip if the path doesn't exist
+    if !path.exists() {
+        return Ok(());
+    }
+    
+    // Skip hidden files and directories
+    if let Some(name) = path.file_name() {
+        if name.to_string_lossy().starts_with('.') {
+            return Ok(());
+        }
+    }
+    
+    // If it's a file, emit the rerun directive
+    if path.is_file() {
+        println!("cargo:rerun-if-changed={}", path.display());
+        return Ok(());
+    }
+    
+    // If it's a directory, recurse into it
+    if path.is_dir() {
+        for entry in std::fs::read_dir(path)? {
+            let entry = entry?;
+            let path = entry.path();
+            
+            // Skip symlinks to avoid potential cycles
+            if path.is_symlink() {
+                continue;
+            }
+            
+            // Recurse into the entry
+            walk_and_emit_rerun_directives(path)?;
+        }
+    }
+    
     Ok(())
 }
 
@@ -53,8 +98,13 @@ fn validate_documentation_during_build() -> Result<(), Box<dyn std::error::Error
     println!("cargo:rerun-if-env-changed=ENABLE_DOC_VALIDATION");
     println!("cargo:rerun-if-env-changed=SKIP_DOC_VALIDATION");
 
-    println!("cargo:rerun-if-changed=src/");
-    println!("cargo:rerun-if-changed=tests/");
+    // Recursively walk through source directories and emit rerun directives for all files
+    if let Err(e) = walk_and_emit_rerun_directives("src") {
+        println!("cargo:warning=Failed to walk src/ directory: {}", e);
+    }
+    if let Err(e) = walk_and_emit_rerun_directives("tests") {
+        println!("cargo:warning=Failed to walk tests/ directory: {}", e);
+    }
 
     // Create RAII guard that sets the environment variable and ensures cleanup
     let _guard = DocValidationGuard::new();
@@ -114,7 +164,7 @@ fn validate_openapi_generation() -> Result<(), Box<dyn std::error::Error>> {
 /// OpenAPI validation with feature flag support
 fn placeholder_openapi_validation() -> Result<(), Box<dyn std::error::Error>> {
     // Check if openapi-validate feature is enabled
-    if cfg!(feature = "openapi-validate") {
+    if std::env::var_os("CARGO_FEATURE_OPENAPI_VALIDATE").is_some() {
         println!("cargo:warning=OpenAPI validation enabled via feature flag");
         return validate_openapi_generation();
     }
@@ -169,9 +219,11 @@ fn run_documentation_tests() -> Result<(), Box<dyn std::error::Error>> {
     // Only run doc tests during build validation
     // Skip integration tests to avoid requiring database setup during build
 
+
     println!("cargo:warning=Running documentation tests...");
 
-    let mut command = create_cargo_command("cargo", &["test", "--doc", "--quiet"]);
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
+    let mut command = create_cargo_command(&cargo, &["test", "--doc", "--quiet"]);
     let output = command.output()?;
 
     if !output.status.success() {

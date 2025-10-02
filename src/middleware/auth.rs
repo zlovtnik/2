@@ -5,10 +5,15 @@ use uuid::Uuid;
 use async_trait::async_trait;
 use tracing::{info, warn, error, debug};
 
+/// Represents an authenticated user in the system.
+/// 
+/// This struct wraps a user ID and is used to represent an authenticated user
+/// in the request handling pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AuthenticatedUser(pub Uuid);
 
 #[async_trait]
-impl<S> FromRequestParts<S> for AuthenticatedUser
+impl<S> FromRequestParts<S> for AuthenticatedUser   
 where
     S: Send + Sync,
 {

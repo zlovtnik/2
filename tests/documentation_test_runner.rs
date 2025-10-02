@@ -93,12 +93,20 @@ mod documentation_integration_tests {
         // Poll for server readiness
         let client = Client::new();
         let health_url = format!("http://{}/health/live", local_addr);
+       let mut ready = false;
         for _ in 0..10 {
-            if client.get(&health_url).send().await.is_ok() {
-                break;
-            }
-            sleep(Duration::from_millis(100)).await;
+           if client.get(&health_url).send().await.is_ok() {
+               break;
+           }
+           match client.get(&health_url).send().await {
+               Ok(response) if response.status().is_success() => {
+                   ready = true;
+                   break;
+               }
+               _ => sleep(Duration::from_millis(100)).await,
+           }
         }
+       assert!(ready, "Server at {} never reported healthy", health_url);
         
     // Create example validator (client not used during static validation)
     let base_url = format!("http://{}", local_addr);

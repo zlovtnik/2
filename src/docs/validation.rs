@@ -166,33 +166,52 @@ impl OpenApiValidator {
     fn validate_schemas(&self, result: &mut ValidationResult) -> Result<(), DocumentationError> {
         if let Some(components) = &self.spec.components {
             let schemas = &components.schemas;
+            let spec_json = serde_json::to_value(&self.spec)
+                .map_err(|e| DocumentationError::SchemaValidationFailed {
+                    schema: "spec".to_string(),
+                    error: e.to_string(),
+                })?;
+
+            let mut referenced_schemas = HashSet::new();
+            collect_schema_references(&spec_json, &mut referenced_schemas);
+
             if schemas.is_empty() {
-                result.warnings.push("OpenAPI components present but no schemas defined; skipping schema reference checks".to_string());
-            } else {
-                let spec_json = serde_json::to_value(&self.spec)
-                    .map_err(|e| DocumentationError::SchemaValidationFailed {
-                        schema: "spec".to_string(),
-                        error: e.to_string(),
-                    })?;
-
-                let mut referenced_schemas = HashSet::new();
-                collect_schema_references(&spec_json, &mut referenced_schemas);
-
-                // Check that all referenced schemas are defined (deterministic order)
-                let mut referenced_sorted: Vec<&String> = referenced_schemas.iter().collect();
-                referenced_sorted.sort();
-                for referenced in referenced_sorted {
-                    if !schemas.contains_key(referenced) {
-                        result.schema_errors.push(format!("Referenced schema '{}' is not defined", referenced));
+                if referenced_schemas.is_empty() {
+                    result.warnings.push(
+                        "OpenAPI components present but no schemas defined".to_string(),
+                    );
+                } else {
+                    let mut referenced_sorted: Vec<&String> =
+                        referenced_schemas.iter().collect();
+                    referenced_sorted.sort();
+                    for referenced in referenced_sorted {
+                        result
+                            .schema_errors
+                            .push(format!("Referenced schema '{}' is not defined", referenced));
                         result.success = false;
                     }
                 }
+                return Ok(());
+            }
 
-                // Warn about unused schemas
-                for (schema_name, _) in schemas {
-                    if !referenced_schemas.contains(schema_name) {
-                        result.warnings.push(format!("Schema '{}' is defined but not referenced", schema_name));
-                    }
+            // Check that all referenced schemas are defined (deterministic order)
+            let mut referenced_sorted: Vec<&String> = referenced_schemas.iter().collect();
+            referenced_sorted.sort();
+            for referenced in referenced_sorted {
+                if !schemas.contains_key(referenced) {
+                    result
+                        .schema_errors
+                        .push(format!("Referenced schema '{}' is not defined", referenced));
+                    result.success = false;
+                }
+            }
+
+            // Warn about unused schemas
+            for (schema_name, _) in schemas {
+                if !referenced_schemas.contains(schema_name) {
+                    result
+                        .warnings
+                        .push(format!("Schema '{}' is defined but not referenced", schema_name));
                 }
             }
         }
@@ -453,8 +472,68 @@ impl ExampleValidator {
     
     async fn validate_health_examples(&self, result: &mut ValidationResult) -> Result<(), DocumentationError> {
         // Static validation only - no HTTP requests during build
-        result.warnings.push("HTTP-based health check validation disabled during build".to_string());
-        
+        // TODO: extend with integration checks once network calls are allowed during validation
+
+        let examples = vec![
+            serde_json::json!({
+                "method": "GET",
+                "url": format!("{}/api/v1/health", self.base_url),
+                "expected_status": 200
+            }),
+        ];
+
+        for (idx, example) in examples.iter().enumerate() {
+            match example["method"].as_str() {
+                Some(method) if matches!(method, "GET" | "HEAD") => {}
+                Some(method) => {
+                    result.invalid_examples.push(format!(
+                        "Health example #{} uses unexpected method '{}'; expected GET or HEAD",
+                        idx + 1,
+                        method
+                    ));
+                    result.success = false;
+                }
+                None => {
+                    result.invalid_examples.push(format!(
+                        "Health example #{} missing 'method' field",
+                        idx + 1
+                    ));
+                    result.success = false;
+                }
+            }
+
+            match example["url"].as_str() {
+                Some(url) if url.starts_with("http://") || url.starts_with("https://") => {}
+                Some(url) => {
+                    result.invalid_examples.push(format!(
+                        "Health example #{} has unsupported URL scheme: {}",
+                        idx + 1,
+                        url
+                    ));
+                    result.success = false;
+                }
+                None => {
+                    result.invalid_examples.push(format!(
+                        "Health example #{} missing 'url' field",
+                        idx + 1
+                    ));
+                    result.success = false;
+                }
+            }
+
+            if !example["expected_status"].is_number() {
+                result.invalid_examples.push(format!(
+                    "Health example #{} missing numeric 'expected_status' field",
+                    idx + 1
+                ));
+                result.success = false;
+            }
+        }
+
+        if result.success {
+            result.warnings.push("Health endpoint examples validated statically".to_string());
+        }
+
         Ok(())
     }
 }

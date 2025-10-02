@@ -35,7 +35,12 @@ async fn main() {
     if enable_grpc {
         tracing::info!("gRPC server enabled");
         let grpc_pool = pool.clone();
-        let grpc_addr = SocketAddr::from(([0, 0, 0, 0], config.server_port.saturating_add(1)));
+        let grpc_addr = if config.server_port == u16::MAX {
+            tracing::error!("Cannot start gRPC server: REST port {} is the maximum allowed (65535), cannot assign gRPC port.", config.server_port);
+            std::process::exit(1);
+        } else {
+            SocketAddr::from(([0, 0, 0, 0], config.server_port + 1))
+        };
         
         // Start both servers concurrently
         let rest_server = async {

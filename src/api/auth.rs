@@ -106,11 +106,22 @@ where
         let headers = &parts.headers;
         let token = match headers.get(AUTHORIZATION)
             .and_then(|h| h.to_str().ok())
-            .and_then(|h| h.strip_prefix("Bearer "))
+            .and_then(|raw| {
+                let mut parts = raw.split_whitespace();
+                match (parts.next(), parts.next(), parts.next()) {
+                    (Some(scheme), Some(token), None) if scheme.eq_ignore_ascii_case("Bearer") => {
+                        Some(token.to_string())
+                    }
+                    _ => None,
+                }
+            })
         {
-            Some(t) => t.to_string(),
+            Some(t) => t,
             None => {
-                return Err(AuthError::Standard(ErrorResponse::new("Invalid credentials", Some("Missing Authorization header".to_string()))));
+                return Err(AuthError::Standard(ErrorResponse::new(
+                    "Authentication required",
+                    Some("Missing or invalid Authorization header".to_string()),
+                )));
             }
         };
 
@@ -210,7 +221,7 @@ impl IntoResponse for ErrorResponse {
             // Client-side validation/registration problems
             "Registration failed" => axum::http::StatusCode::BAD_REQUEST,
             // Authentication failures
-            "Invalid credentials" => axum::http::StatusCode::UNAUTHORIZED,
+            "Invalid credentials" | "Authentication required" => axum::http::StatusCode::UNAUTHORIZED,
             // Resource not found
             "User not found" | "Token not found" => axum::http::StatusCode::NOT_FOUND,
             // Conflict / already exists
@@ -703,6 +714,9 @@ mod tests {
     use std::env;
     use sqlx::postgres::PgPoolOptions;
     use std::time::Duration;
+    use chrono::Utc;
+    use jsonwebtoken::{Algorithm, EncodingKey, Header};
+    use serde::Serialize;
 
     // Create a test database connection pool
     #[allow(dead_code)]

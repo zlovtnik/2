@@ -2,7 +2,7 @@
 # Copy the built release executable to prod/ for deployment
 # Usage: ./scripts/deploy_to_prod.sh
 
-set -e
+set -euo pipefail
 
 EXECUTABLE=server  # Change if your binary has a different name
 BUILD_DIR=target/release
@@ -14,8 +14,35 @@ if [ ! -f "$BUILD_DIR/$EXECUTABLE" ]; then
   exit 1
 fi
 
-# Clean prod directory
-rm -rf "$PROD_DIR"/*
+# Safety checks before cleaning the prod directory
+if [ -z "$PROD_DIR" ]; then
+  echo "Error: PROD_DIR is not set."
+  exit 1
+fi
+
+if [ "$PROD_DIR" = "/" ]; then
+  echo "Error: PROD_DIR cannot be '/'."
+  exit 1
+fi
+
+if [[ "$PROD_DIR" == /* && "$PROD_DIR" != /*/* ]]; then
+  echo "Error: PROD_DIR '$PROD_DIR' is a top-level directory. Refusing to remove it."
+  exit 1
+fi
+
+if [[ "$PROD_DIR" =~ ^\.{1,2}$ ]]; then
+  echo "Error: PROD_DIR cannot be '.' or '..'."
+  exit 1
+fi
+
+if [ ${#PROD_DIR} -lt 2 ]; then
+  echo "Error: PROD_DIR '$PROD_DIR' is too short to be safe."
+  exit 1
+fi
+
+# Clean prod directory by removing and recreating it
+rm -rf "$PROD_DIR"
+mkdir -p "$PROD_DIR"
 
 # Copy the executable
 cp "$BUILD_DIR/$EXECUTABLE" "$PROD_DIR/"
